@@ -1,0 +1,12 @@
+PhysicsBank subject adaptation
+
+Source: https://github.com/HalHa8/physics-question-bank
+Local source snapshot: physics-question-bank-main (version 0.1.0).
+PhysicsBank derives from MathBank (https://github.com/JudgePeach/math-question-bank).
+License: GNU Affero General Public License v3; see engine/LICENSE.
+Original copyright notices and licenses remain applicable.
+
+Adapted: physics prompt rules, question types, source condition vocabulary, physics diagram and experiment handling, topic keywords and subject-specific paper defaults.
+Integration retains the current MathBank 2.7.0 extraction, asset and source-review infrastructure.
+Source hashes: physics-source-manifest.json. Modified upstream files: platform-adaptations.json.
+No user data or credentials copied.

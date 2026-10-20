@@ -1,0 +1,244 @@
+## 2026-10-20：独立部署与 Git 初始化
+
+- 用户决定放弃旧 3010 实例（`D:/工作/edusystem-gpt`），本系统独立运行，不再同步。旧容器 `mathbank-platform-mathbank-1` 未停止、未改动。
+- 部署：本目录 `docker-compose.yml` 改为项目名 `mathbank`、容器 `mathbank`、镜像 `mathbank:current`、端口 `127.0.0.1:3011`、数据 `./data`。旧文件指向 3010 的镜像和端口，项目名又随目录名与 3010 相同，在本目录执行 `docker compose up` 会接管 3010 的容器；现在已不会。`deploy/Dockerfile` 基于 `mathbank:base`（即原 3011 运行镜像改名，内容不变）只替换代码；新机器用根目录 Dockerfile 构建 `mathbank:base`。`scripts/check_bank_health.py` 默认地址改为 3011。
+- 数据：原 `mathbank-staging` 容器（10 分钟内无请求）正常停止后，把 `test-results/single-bank-docker-data` 重命名为 `data/`，未复制、未改写。原 `data/` 是 10-15 的本地旧副本，没有容器使用，移到 `test-results/legacy-data-20261015`，未删除。新容器启动后 9 个空间健康检查通过，讲义 PDF/Word 两版导出正常。
+- Git：`main` 分支一个初始提交，472 个文件。
+  - `.gitattributes` 设 `* -text`，并在本仓库设置 `core.autocrlf=false`，按字节保存：本机全局 `autocrlf=true` 会把 CRLF 文件转成 LF，使引擎哈希与 `platform-adaptations.json` 对不上，也破坏 Windows 启动器要求的 CRLF。已核对全部适配哈希与提交内容一致。
+  - 排除 `data/`、`test-results/`、上传目录、数据库、`.env*`；保留上游模板 `engine/.env.example`，其中只有占位值。
+  - 提交前扫描未发现真实密钥，仅有测试临时账号共用的测试密码。
+  - 从新克隆的副本运行平台测试，**143 passed**。
+
+## 2026-10-20：试卷导出两处排版修复
+
+- Word “题干右侧”配图：引擎原用 `wp:anchor` 四周型浮动图。在 Microsoft Word 中，选项表格被推到图下方，下一题的图会压到上一题的选项上。现改为无边框两栏行：左栏题号与题干，右栏顶部右对齐配图（图宽与高的上限不变），中间一个 4pt 空段，下面接通栏选项，与 PDF 的两个 minipage 一致。题干含表格时，整宽表格放不进左栏，改按“下方居右”。讲义 Word 删去自己的两栏实现，改为覆盖引擎方法，只换配图尺寸。
+- 题干末尾空括号：引擎 `clean_choice_stem_parentheses` 只去掉题干最末尾的空括号，“……为（ ）。”的括号后面跟着句号，于是留了下来，exam-zh 的 `\paren` 又补一对，PDF 中出现两对括号。现在括号后紧跟的 `。`／`．`／`.` 随括号一并去掉。网页预览的 `cleanChoiceStemParentheses` 同步修改，并补上它原先不认的 `$(\quad)$` 写法（以前会留下一个孤立的 `$`）。非空括号（如“（结果保留π）。”）和普通句号不受影响。讲义导出删去平台自带的同类规则，统一用引擎规则。
+- 测试：新增 `test_paper_export_layout.py` 4 项：
+  - Word 右图为两栏行，无浮动图，图宽 1.55 英寸不变，选项表格独立且不与上一行相连；
+  - 题干含表格时按“下方居右”；
+  - Python 括号规则与 `clean_content_for_latex` 只输出一个 `\paren`；
+  - 网页预览规则由 Node 执行，结果相同。
+
+  `engine/AGENTS.md` 与 `platform-adaptations.json` 已同步。上游核心回归 949 passed；另有 10 项失败都是 Windows 环境限制（7 项需要符号链接权限 WinError 1314，3 项是已知的命令行过长 WinError 206），与本次改动无关；在新镜像的一次性 Linux 容器（无网络、不挂数据）中运行同一组上游回归，**962 passed**、9 skipped。平台与试用工具 **146 passed**，五组浏览器回归通过。
+- 3011 实测：镜像 `paper-fix-candidate` 重建容器（回滚镜像 `single-bank-candidate-before-paper-fix`），9 个空间健康检查通过。空间 8 的 5 道圆题和空间 9 的 8 道物理题导出 Word（单文件）与 PDF。Word 用本机 Microsoft Word 打开渲染，题干与右图并排，选项在下，没有重叠；PDF 中每道选择题只有一对括号。对照图见 `test-results/handout-samples/试卷导出修复对照.png`。讲义样张重导后 Word 版式不变，PDF 文本中没有重复括号。
+
+## 2026-10-20：讲义系统第一期
+
+- 新增“讲义”工作区：讲义目录（`folders.kind='lesson'`，两级）与列表；编辑器为大纲、按模板绘制的页面（教师版／学生版预览）和内容设置三栏；块种类固定，定义／定理类／例题／插图按小节连续编号；例题与练习从题库检索或组卷题篮插入快照，“题库更新”可查看并同步；整份自动保存，修订号冲突时提供另存或载入最新。导出 PDF（exam-zh + `mathbank-handout.sty`）与 Word（`handout_word.py`，继承引擎 Word 试卷构建器），各有学生版、教师版。新表 `handouts`，迁移 `handouts-v1`（先在线备份）。设计见 `docs/HANDOUTS.md`。
+- 引擎修复：Word 题干右侧浮动图写成 `wrapText="both"`（OOXML 合法值为 `bothSides`），Microsoft Word 因此拒绝打开**任何**带右侧配图的 Word 试卷；改一处并更新 `platform-adaptations.json` 哈希，加回归测试。用 3011 导出的普通试卷验证：修复前 Word 报“无法打开”，修复后可打开。另发现：引擎浮动右图在 Microsoft Word 中会把下面的选项表格推到图下方并与下一题的图重叠（已在上一条修复）。
+- 修复：讲义模板 `\mbneedspace` 中 `\dimen0\newpage` 在比较尚未结束时展开 `\newpage` 的内部条件，教师版 PDF 编译报“Incomplete \ifdim”；加空格结束数字。`/changes` 原先直接哈希题库原始字段，题目配图位置为空时会被误报为“已修改”，改为先按快照规则规范化。
+- 测试：新增 `test_handouts.py` 8 项（增删改、修订冲突 409、校验、查看者只读与导出、快照的路径形式与 `/changes` 修改／删除、讲义目录与删目录上移、Word 导出结构与右图两栏表格、LaTeX 源码中的模板块与转义、已有安装补建表与备份、Word 浮动图 `bothSides` 回归）；平台与试用工具 **143 passed**。新增 `handout_ui_smoke.py`（纳入 `run_tenant_ui_tests.py` 默认五组）：讲义目录中新建、定义的加粗／列表／公式／填空线与编号、从题库插入例题与练习、教师版参考答案、上传插图与移动后重新编号、学生版隐藏解答显示留白、刷新后自动保存仍在、编辑器导出 Word 文件名、暗色下页面公式保持深色、390px 无横向滚动、查看者只读可导出。Q&A 新增“讲义”分类 3 条（共 31 条），并删去“讲义尚未接入”的旧说明。
+- 3011：镜像 `handouts-candidate`（基于 `source-view-candidate`，见 `test-results/Dockerfile.handouts-candidate`）重建容器，回滚镜像 `single-bank-candidate-before-handouts`；9 个空间健康检查通过。真实导出：数学样张《圆的有关概念与计算》PDF 学生版／教师版各 4 页，Word 两版在 Microsoft Word 中打开渲染为 3 页，与 PDF 结构、配色、编号一致（对照图与样张在 `test-results/handout-samples/`）；物理空间讲义 PDF、Word 两版均正常，单位与公式无误。3011 页面实测：建讲义、写定义、选例题／练习、上传插图、调序重编号、刷新保留、导出 Word 与 PDF 下载、暗色、390px，页面无脚本错误（控制台仅有平台有意拦截的引擎更新检查 403）。
+- 未做／已知：样张所用题库题目没有答案，解答区显示“（暂无答案）”；旧讲义导入、团队抬头、AI 辅助为第二期。3010 未升级，其 Word 试卷仍有上述无法打开的问题。
+
+## 2026-10-16：导入中心原卷对照与界面统一
+
+- 左栏改为统一上传区（拖入或选择文件，另有“粘贴文本”“MinerU 识别”），原 MinerU 卡片并入；选好试卷后左栏整栏显示原卷，解析设置移到右栏，开始解析后收起，审查时左原卷、右题卡对照。两栏分隔条可拖动；步骤条按“选择／配置／拆解／审查”实时高亮。
+- 原卷：PDF 用浏览器查看器（隐藏缩略图栏、按宽度适配）；Word 新增 `previews.py`，服务器用 LibreOffice 7.4 转 PDF（独立配置目录、单任务锁、120 秒超时、按哈希缓存 3 天）；TeX／Markdown／粘贴显示可修改的源码；MinerU 显示上传的原卷或结果包中的 `*_origin.pdf`（新增 `/mineru/{job}/origin`），可切换“识别文本”。更换文件时，仍等于旧文件名的自动标题随新文件更新。
+- 镜像：项目 Dockerfile 与测试镜像加入 `libreoffice-writer-nogui` 与 `libreoffice-math-nogui`（只装前者时 Word 公式在预览中整段空白，已用样例试卷确认后补装）。已知局限：左右括号不配对的公式（半开区间 `[1,+∞)`）在 LibreOffice 7.4 预览中显示为“¿”，解析不受影响，以原 Word 为准。因此原版“Word 原文页视觉复核”在容器中也会生效（默认开启，会增加识图调用，可在 Word 选项中取消）。
+- 测试：新增 `test_source_preview.py` 2 项（转换一次后走缓存、只读成员 403、非 docx／坏文件 400、无 LibreOffice 503、转换失败 422）；`test_mineru_import.py` 增加原卷下载与越权 404；`workspace_ui_smoke.py` 增加导入中心检查（PDF、TeX、清空、粘贴、设置位置、步骤条）。3011 用 Chrome 实测：空状态、PDF（5 页原卷）、Word（样例试卷经 LibreOffice 渲染）、TeX、粘贴、MinerU 结果包（原卷与识别文本切换）、审查阶段（左原卷右题卡、分隔条拖到 61%）、暗色、390px，均无页面错误、无横向滚动。样例 Word 为自制，没有使用本机其他 Word 文件。
+
+## 2026-10-16：选项排列、试卷管理两级目录、侧栏收起
+
+- 选项排列：题目内容中的 exam-zh 原生 `\begin{choices}[columns=N]` 为唯一来源。编辑器预览栏新增“选项排列”（自动／一行四个／两行两个／每行一个）；网页预览固定列数并修正手写参数被当成 A 选项、标号顺延到 E 的问题；自动时网页只按实测宽度在 4／2／1 中选择。Word 新增 `engine/mathbank/choice_layout.py`：读取参数，自动时按 exam-zh“能放下的列数、从 4 折半”规则估算宽度（选项区 41em，按导出 PDF 实测）。在 3011 两个空间 36 道真实选择题上与实际导出 PDF 的列数全部一致（旧 Word 规则 32/36）。
+- 3011 实测（真实导出）：物理 #12 自动 PDF 2 列／Word 2 列，手动一行四个后 PDF 4／Word 4；#1 自动 PDF 4／Word 4，手动每行一个后 PDF 1／Word 1；编辑器切换“两行两个”后源码写入 `columns=2`、预览 2 列，改回自动后参数移除。题库详情栏比 A4 窄，自动时 #12 显示 1 列（PDF 为 2 列），属预期。
+- 试卷管理：“试卷记录”更名“试卷管理”（导航、标题、提示文字、图标）。目录改为左侧两级目录树：行内新建一级目录与子目录、重命名、删除确认；点目录筛选，一级目录包含子目录的试卷；拖动试卷卡片到目录归档，卡片下拉框仍可移动。后端限制两级（旧安装的更深目录仍可列出、筛选、删除）、同级不重名（409）；删除改为“子目录一并删除、试卷移到上一级”，不再因非空拒绝。修复：列表刷新触发的目录重载可能覆盖刚拖动的结果（加版本号）。
+- 侧栏收起：桌面侧栏右上角按钮收成 72px 图标栏，悬停显示名称，题篮数量改为角标；选择存 `mb_nav` cookie，服务端输出 `<html data-nav="collapsed">`，刷新不闪动；手机宽度不显示该按钮。
+- Q&A 增加“选项排列”条目并更新目录、侧栏说明（共 28 条）。绘图插件评估见 `docs/drawing-tools.md`（只评估，未开发）。
+- 测试：平台与试用工具 pytest 全部通过（新增 `test_choice_layout.py` 3 项、侧栏 cookie 1 项，目录测试改为两级、同级重名、删除上移）；四组浏览器回归通过，`workspace_ui_smoke.py` 覆盖目录树新建／子目录／筛选含子目录／拖动／重命名／删除、侧栏收起与刷新保持、预览选项列数。3011 以 `mathbank-platform:layout-candidate` 重建（回滚镜像 `single-bank-candidate-before-layout`），桌面、暗色、390px 截图无页面错误、无横向滚动。引擎在 Windows 下有 3 项既有测试因命令行长度限制（WinError 206）无法运行，与本次改动无关。
+
+## 2026-10-16：初中数学人教版补九年级目录
+
+- 迁移 `junior-math-grade9-v1`（`platform_app/junior_math_grade9.py`）：只向目录止于八年级下册的“初中 · 数学 · 人教版”教材末尾追加“九年级上册”“九年级下册（暂定）”及年级“九年级”，已有册、章、节和题目分类不变；迁移前在线备份 platform.db，旁附 JSON 说明。目录取自 beike 起草的初中数学人教版大纲，九下为旧版内容、无章号，均待人工核对；另注意八年级下册止于第二十三章，九年级上册从第二十五章起，章号衔接需对照新教材确认。
+- 测试：新增 `test_junior_math_grade9.py` 2 项（只改目标教材、追加不改旧册、备份、重复执行无变化；迁移前已建空间的运行中 worker 与迁移后新建空间都能按九年级章节保存，旧题分类不变）。平台与试用工具 **129 passed**。
+- 3011：镜像 `grade9-candidate` 重建容器（回滚镜像 `single-bank-candidate-before-grade9`），迁移只改教材 id 6，备份 `before-junior-math-grade9-*.db`。真实页面中两个初中数学空间的题库筛选、题目编辑器均可逐级选到九上“第二十九章 圆”各节与九下各章，无页面错误。用同一拆卷模型重跑《第19讲 圆》：16 题全部归入九年级（圆 9、直线与圆的位置关系 6、三视图 1），此前 9 题归勾股定理、其余归轴对称／全等三角形／几何图形初步。重跑只查看拆题结果未入库，空间“MinerU A+ 复测 · 初中数学”中已存的 16 题仍是旧分类。
+
+## 2026-10-16：MinerU 导入（方案 A+）
+
+- 新增导入中心“MinerU 解析”：PDF／图片交给 MinerU（平台设置 `mineru_key`，团队优先，不下发 worker），或上传 MinerU 结果包；`mineru_markdown.py` 按 content_list 坐标重建 Markdown（题号统一为“N．”、标题去编号、图内／图下短文字视为图中标注、图片选项按同排或对齐网格且尺寸相近判定，其余图留在题干），配图按每批 20 张上传；结果作为 .md 载入原生导入，`bridge.js` 把配图对应关系带给拆题请求。MinerU 客户端移至 `platform_app/mineru_client.py`，试用工具共用。
+- 测试：平台与试用工具 **127 passed**（新增 `test_mineru_import.py` 8 项：题号与标题、图中标注、单排／网格图片选项、无括号或文字选项不改动、23 张配图分批上传与路径映射、Key 与查看权限、MinerU Key 不进 worker、模拟 MinerU 的 PDF 强制 OCR 流程）。四组浏览器回归通过；其中一次与 3011 长时间拆题并行时 multitenant 失败一次，单独及完整重跑均通过。
+- 3011 实测（与 3010 相同的中转站拆卷模型，复用用户此前的 MinerU 结果包，经真实页面操作）：第19讲 16/16 题、15/15 配图，原文核对提示由 16 题降至 9 题（其余为 AI 规范化填空线与补公式引起的提示）；物理大招题库第 10–20 页 35/35 题、58/58 配图，8 道图片选项题全部与原页一致（上一轮 3/8）。MinerU 步骤约 3–4 秒，拆题 86 秒／3 分 55 秒。结果保存在空间“MinerU A+ 复测 · 初中数学／高中物理”。
+- 未验证：PDF 直接调用 MinerU 的真实请求（3011 未配置 MinerU Key，仅用模拟接口测试）；强制 OCR 对隐藏文字层乱码的实际修正效果。已知：MinerU 漏行／乱码不会被修正；初中数学人教版目录缺九年级，导致圆章节题被归到相近章节（已补，见上条）。
+
+## 2026-10-15：一空间一学科学段、平台代码整理与界面统一
+
+- 数据结构：空间直接对应一个题库（学科 + 学段 + 教材，创建后固定，触发器保护 `textbook_id`），取消 lanes。学科学段从教材联表读取，不再冗余。`single-bank-spaces-v1` 迁移沿用旧分区 id，题库目录、工作台链接与浏览器草稿不变；多学段空间按学段拆分，成员与试卷目录随之复制。迁移统一登记在 `platform_migrations`，新安装直接建当前结构。
+- 代码：`app.py`（505 行混合逻辑）拆为 `auth`、`admin`、`spaces`、`bank`、`migrations`、`assets` 等模块；删除 `extensions.py`、`validation.py`、`account.css`、`space-tools.js`。三处引擎物理适配改读 `MathBankPlatform.space`，`platform-adaptations.json` 已更新哈希。
+- 修复：分页跨空间检索改为按单一来源空间精确分页；引用同一题的并发请求只生成一份副本；删除试卷或题目时同步清理目录与来源链接（引擎 id 可复用）；worker 满额时回收最久未用的空闲 worker；登录后进入上次使用的空间；`worker-config.json` 改为原子写入，避免拷入的数据目录因文件属主不同而 chmod 失败。
+- 新增管理能力：管理员编辑姓名、重置密码、停用账号（立即失效）；超级管理员改角色与团队、停用教材；空间重命名；试卷目录重命名、删除（非空拒绝）。
+- 界面：侧栏单张空间卡片与按学段学科分组的搜索面板；跨空间选题、归档目录、目录筛选与移动、目录管理全部放入原版工具栏或统一对话框，样式集中于 `platform.css`，复用原版主题变量与控件类。前后对比截图在 `test-results/single-bank-ui/`。
+- 验证：平台测试 **116 passed**（含旧库迁移、账号边界、教材停用、并发引用、worker 回收）；`scripts/run_tenant_ui_tests.py` 四组浏览器回归全部通过（新增 `workspace_ui_smoke.py`），无 pageerror；Linux 离线容器上游核心回归 **962 passed、9 skipped**。
+- Docker：新镜像 `mathbank-platform:single-bank-candidate`（在 `mathbank-platform:local` 运行时上替换 engine 与 platform_app）以独立容器 `mathbank-staging` 运行于 `http://127.0.0.1:3011`，使用默认 bridge 网络，数据为正式库经容器内在线备份后的副本（已清除模型密钥，管理员密码已替换，见 `test-results/single-bank-docker-data/initial-admin.txt`）。启动迁移把 test-2 拆为“test-2（初中）”“test-2（高中）”；5 个空间 questions/categories/stats/papers 全部可读，题数 57/1/1/0/0 与快照一致，3 份试卷及 2 个目录保留；跨空间复制、归档保存、PDF 与 Word 导出在容器内实际成功。
+- 未改动：正式容器 `mathbank-platform-mathbank-1`（挂载 `D:\工作\edusystem-gpt\mathbank-platform\data`）及其镜像标签、zhike 三个容器、Docker 网络与宿主机网络。快照只在正式容器内做在线备份后复制出来，未从 Windows 打开其数据库。
+- 未验证：真实模型调用（未使用用户密钥）。
+
+## 2026-10-15：多账号、多空间、多用户专项验收
+
+- 验收既有“团队 → 账号”和“空间 → 学段 → 教材”层级，以及空间内多级试卷目录。API 使用 7 个账号身份、两个团队、个人/团队/公共空间与两个学段；没有引入额外组织模型。
+- 新增 `tests_platform/test_multitenant.py` 共 72 项，与既有平台回归合计 **106 passed**，Windows 和 Linux 均通过。覆盖可见空间集合、账号列表边界、35 组目录读写权限、即时授权/撤权、跨团队拒绝、同名账号并发创建、三个身份并发写入 12 道共享题目、并发启用学段仅生成一个分区、目录归属、试卷归档、题目引用、任务归属、密码变更后全部会话失效、停用账号和旧标签页会话保护。
+- 上游 Linux 核心回归 **962 passed、9 skipped**。在无网络临时容器中复制源码到临时目录执行；本轮未改动上游引擎源码。
+- `python scripts/run_tenant_ui_tests.py` 自动建立全新临时数据和随机回环端口，依次运行首次引导、原有账号管理和新增多浏览器专项，全部通过，无 pageerror。新增浏览器专项使用 5 个账号、两个团队、4 个空间、每空间两个学段，验证独立会话、同浏览器换账号、草稿/题篮隔离、多标签页会话变更、35 层目录、六个工作区切换及 390px 暗色界面。
+- 修复七类已复现问题：重复团队名触发 500；非法目录引用触发 500；团队管理员在只读公共空间看到无效管理按钮；权限弹窗把已有编辑授权显示为查看；超过 30 层的目录路径丢失祖先；另一标签页换账号后旧界面仍能读取新账号结果；从题库/组卷进入“我的”时旧 div 工作区仍显示。修复均有回归覆盖。
+- 成员权限从受限接口读取当前有效值；目录引用统一校验 ID、空间和类型；目录路径按已访问 ID 防环；旧会话读取返回 409 和专用会话变更响应头，前端重新打开当前账号工作台；“我的”隐藏全部原工作区容器并保留编辑状态。
+- 正式更新前活动导入任务为 0。保留原数据挂载，只更新 MathBank 容器；http://localhost:3010 状态 healthy。正式浏览器对五个分区逐一检查六种工作区切换、会话变更响应、手机界面及前端资源哈希，全部通过。
+- 正式账号仍为 1 个、空间仍为 4 个、分区仍为 5 个；没有向正式数据写入测试账号、团队、空间、题目或试卷。题目数为 **0 / 1 / 1 / 0 / 0**。更新前后每个分区 questions/categories/stats/papers 完整 JSON 指纹及平台业务表数量完全一致。快照为 `test-results/tenant-production-before.json` 和 `tenant-production-after.json`；运行期 SQL 仅在服务容器内执行，并显式关闭连接。
+- 本机镜像 `mathbank-platform:multitenant-20261015` 已标记 local 并部署；回退镜像为 `mathbank-platform:before-multitenant-20261015`。使用已有缓存运行时仅复制 platform_app，不宣称完成从官方基础镜像的完整可移植构建。
+- 其他三个业务容器持续运行，测试容器与临时服务均已关闭。项目网络仍为自动分配的 10.240.2.0/24，宿主机百度 HTTPS 前后为 200；开始检查时 GitHub HTTPS 超时且没有发现 xray_tun，因此不宣称 TUN 开启状态验收。未修改 TUN、代理、路由、DNS、WSL、Docker 引擎或网络配置。
+- 证据：`test-results/multitenant-ui-report.json`、`multitenant-mobile.png`、`production-multitenant-mobile.png`、`multitenant-source-hashes.json`。测试覆盖上述场景，不等同于证明所有输入绝无缺陷；未进行大规模长期压测或真实 AI 调用。
+- 清理待办：自动审批策略拒绝删除独立临时测试目录，返回 `blocked by policy`，未提供更具体原因。`C:/Users/14131/AppData/Local/Temp/mathbank-multitenant-ui-8491e60ca0c1463d90999fd03d5c2a08` 及其运行记录 JSON 原地保留；已核对没有残留的本机平台或 worker 进程，不影响正式服务。
+
+## 2026-10-15：后台连接中断修复
+
+- 复现：主平台 /healthz=200，但 bank/1/api/questions 持续 500，配置接口仍 200；分区日志 SQLITE_CANTOPEN（unable to open database file）。容器内新 SQLite 连接也失败，排除仅为网页旧提示。历史记录还有 platform.db disk I/O error。
+- 根因判断：上一轮验收脚本从 Windows 直接连接 Linux 容器正在使用的绑定目录 SQLite；WAL/SHM 跨内核生命周期冲突后留下失效文件句柄。此前把临时恢复当作已解决是不充分的验收。未通过在正式数据上再次触发故障来做因果实验。
+- 检查无活动导入任务后正常关闭本项目容器，在无网络临时容器中保留原始 DB/WAL/SHM（若存在）恢复副本，再对六个数据库执行 integrity_check，全部 ok。备份 data/recovery_backups/connection-1792056383066751255；题目数量仍为 0/1/1/0/0。未删除 WAL/SHM、未恢复旧业务数据。
+- 停用危险的 test-results/difficulty_production_check.py；AGENTS.md 明确禁止宿主机 SQLite 打开运行中 Docker 数据库。scripts/check_bank_health.py 仅调用认证 HTTP API，检查每个分区的题目、分类、统计、试卷，不依赖仅证明进程存活的 /healthz。
+- 平台连接状态增加 HTTP 状态/响应形状校验、10 秒单次超时、2/5/10 秒有限重试、点击/键盘重试与网络恢复重试；不会刷新页面或修改编辑/导入状态。原版独立运行保持兼容。
+- tests_platform/connection_ui_smoke.py：故障注入 HTTP 500 + 合法 JSON、自动恢复、持续失败最多四次、手动恢复、未保存题干/导入标题保留，全部通过。平台/难度 21 passed；上游 962 passed、9 skipped。
+- 恢复后五个分区连续 100 次 API 读取通过；部署重连功能后再次通过 60 次读取和五个分区真实浏览器绿色状态核验。其他项目容器保持运行，未改变 Docker/TUN/代理/路由/DNS。
+
+
+## 2026-10-15：全平台五级难度与独立标签
+
+- 难度为 1 基础、2 简单、3 中等、4 较难、5 困难；unrated 表示待确认，不算第六级。易错、强基、竞赛、挑战为独立 tags。
+- 同步教材保存、平台启动迁移、worker 配置、ORM 写入、AI JSON/提示规则、录入默认值、旧浏览器草稿、文件导入卡片、题库/跨空间筛选、组卷五级题数比例、统计与 Q&A。待确认不计入比例分母；空卷/全待确认无虚构比例，整数百分比合计 100%。
+- 旧难度不推断等级，保留为标签；自定义旧标签保留原文。迁移先完成所有 SQLite 在线备份，再逐库提交，重复运行幂等。未改变上游 schema 版本。
+- 修复默认难度在异步元数据加载后被误判为编辑的问题；初始化使用同一默认值。文件导入增加独立标签字段，保存快照与提交保留 tags。
+- 平台/物理/难度测试：34 passed；上游核心：962 passed、9 skipped。JS 语法/Python 编译通过。
+- 浏览器：difficulty_ui_smoke.py 验证五级选项、标签按钮、旧草稿、导入卡片实际入库、标签不改变比例、未定级排除及取整；account_ui_smoke.py 和 paper_layout_ui_smoke.py 通过。正式浏览器只读核验通过。
+- Docker 候选运行验证健康、身份认证、worker、持久化及统计后部署到 http://localhost:3010；复用已有缓存运行环境，未宣称全新依赖构建。正式容器 healthy，其他三个 zhike 容器保持运行，验收容器和 3012 服务已停止。
+- 正式迁移 6 个教材模板、2 个题库各 1 题；备份 data/migration_backups/difficulty-1-5-1792055633101475293/。核对前后题干等非难度字段、图片哈希及试卷记录不变。保留镜像 mathbank-platform:before-difficulty-five-20261015。
+- 正式核验期间宿主机读取共享 SQLite 后一次 API 出现临时 disk I/O error；后续 API 重试恢复。改为 API 核验完成后关闭客户端再核对数据，所有分区及实际浏览器复验通过。未重置数据库或删除 WAL 文件。
+- 未调用真实模型，不宣称 AI 难度判断质量已验证。未修改 Docker 引擎、TUN、路由、DNS 或代理；本轮未检测到 xray_tun，未宣称 TUN 开启状态验证。
+
+# 本机验收记录
+
+日期：2026-10-14。运行目录：`mathbank-platform`。正式入口：`http://localhost:3010`。
+
+## 2026-10-15 选项右侧生效条件与跨空间默认预览
+
+- 按用户确认的规则，只有单选/多选且正文识别到非空选项时尝试左右分栏。非选择题（即使含选项块）、选择题无选项或空选项块，都与 `bottom_right` 等效，原 `choices_right` 设置和正文保持不变。题型修改即时刷新编辑预览。
+- 录入/详情/题库列表/组卷与 PDF/Word 同步规则。PDF 与 Word 回归直接比较退化情形与显式下方居右的完整排版输出；支持带参数的 choices 块，参数不再被 Word 当成额外选项。
+- 跨空间窗口复用只读题库预览，显示来源记录的默认位置、尺寸及逐图排版，不依赖当前题篮/同名题号，不增加修改来源题目的控件。HTML 清洗白名单不变，清洗后仅对生成的题图节点重新应用枚举校验过的尺寸。
+- `figure_mode_rules_ui.py` 验证六种题型/选项组合、编辑中切换题型、组卷菜单、跨空间不同位置/尺寸、同号隔离、实际加载图片及 390px 无横向溢出；此前点击图片/保存重开回归通过。
+- 平台及物理测试 **31 passed**；Linux 核心 **962 passed, 9 skipped**；账号/空间/Q&A/手机/暗色浏览器流程通过；A/B 试卷独立快照、失败回滚和快捷导出通过；实际选项前图片 PDF/Word/TeX 导出通过。修改 JS 语法与来源适配清单哈希检查通过。
+- 已部署本机缓存运行时构建，回滚标签 `mathbank-platform:before-figure-rules-20261015`。正式服务 healthy，5 个分区可读、静态资源哈希一致，正式跨空间窗口已按默认排版显示真实图片，题库详情菜单可用。正式核验只读，未写测试题目/试卷；旧轮次数据指纹与当前题目不一致，不能用旧基线宣称本轮部署前后数据指纹完全相同。
+- 本轮隔离测试服务及容器已关闭，其余三个容器保持运行。未修改 Docker 网络/TUN/代理配置；本机未发现 xray_tun 网卡，因此没有声称完成 TUN 开启状态验收。
+
+## 2026-10-15 修复“选项右侧”退回居中及题库入口缺失
+
+- 使用“题干 → 独立图片 → choices 选项”的隔离题目复现：切换后图片失去 `data-figure-align-qid`，回归脚本明确失败。原先只有题末图片的验收未覆盖这种常见录入格式。
+- 前后端增加一致的独立配图识别：紧邻选项前、单独成行的图片与题末图片均支持题级排版；不改写题目正文。表格、选项内图片、正文同一行或带后续图注的图片保留锚点。多个配图保持先后顺序。
+- 录入/题库详情识别独立配图后提供完整五种位置，题库卡片采用共享分栏渲染；组卷刷新调用修正为模块内函数，列表与卷面读取同一最新题目，避免左栏一直显示旧排版。
+- `tests_platform/choices_right_regression.py` 从红转绿：选项前配图、反复点击/切换、全库左栏、保存重开、手机、题库卡片和详情菜单、编辑器公式、正文保真及锚点保护通过。原题末图片用例通过，A/B 试卷隔离/刷新/失败回滚/快捷导出用例通过。
+- Linux 核心回归 **956 passed, 9 skipped**；平台/物理用例 30 项通过，清单守卫更新哈希后单独通过（合计 31 项）。所有修改 JS 通过 `node --check`。
+- 在隔离容器以 `CHOICES_FIGURE_BEFORE=1` 运行真实 PDF/Word/LaTeX 导出：选项单列、配图右栏，Word 原生公式与四个选项段落通过，PDF 图片位置断言通过。
+- 使用本机缓存运行时构建并部署；回滚镜像 `mathbank-platform:before-choices-fix-20261015`。部署前任务记录为 0。正式服务 healthy，全部 5 个分区可读取，前端资源哈希一致；实际物理题库详情已显示分栏及“选项右侧”菜单。正式题目、试卷/关联表、教材元数据指纹保持不变，未写入测试题目。
+- 隔离测试容器和 3012 测试服务已停止，其他三个容器保持运行。未改 Docker 网络、TUN、路由或代理；部署前后均未发现 xray_tun 网卡，不宣称 TUN 开启状态已验证。
+
+## 2026-10-15 新增“选项右侧”配图
+
+- 新增 `choices_right` 第五种普通配图位置：题干通栏，下方选项纵向单列居左、题末配图居右。录入编辑器及组卷图片菜单均可选择，大小受右栏宽度约束；原有正文/选项内图片保持锚点，无可识别选项时下方显示配图。
+- 共享预览渲染器覆盖标准 choices 块和分行 A/B/C/D 选项。分栏样式放在静态 CSS 中，经过富文本清洗后仍有效；重排后再次调用安全公式渲染，避免显示原始 LaTeX。没有放宽 HTML 安全白名单。
+- PDF/LaTeX 使用题干后的左右 minipage，左栏固定单列选项；Word 使用无边框两列表格，选项公式保持可编辑。沿用每卷独立保存排版、调整同时更新题库默认值的规则。
+- 平台与物理专项 **31 passed**，新增模式录入、存卷与默认值修改隔离验证通过；扩展 Linux 回归 **950 passed，9 skipped**。四个前端 JS 文件语法检查通过。
+- `tests_platform/choices_right_ui_smoke.py` 验证真实菜单选择、题干宽度、选项/图片几何位置、单列选项、保存重载、手机、编辑器分栏及公式，全部通过，无 pageerror。账号管理/Q&A 浏览器验收通过；Q&A 保持 26 条并补充五种题图位置说明。
+- `tests_platform/choices_right_export_acceptance.py` 实际三格式导出成功：LaTeX 4961 bytes、Word 74995 bytes、PDF 47909 bytes（1 页）。验证 PDF 配图与 A 选项同行且位于右侧、Word 左单元格四个选项段落及可编辑公式、右单元格图片；PDF 已渲染目视核对。报告 `test-results/choices-right-export-report.json`，图片 `choices-right-export.png`，浏览器图片 `choices-right-paper.png`、`choices-right-editor.png`、`choices-right-mobile.png`。
+- 更新前正式库注册导入任务为 0。保留镜像 `mathbank-platform:before-choices-right-20261015`，仅更新本项目容器。正式核验脚本 `test-results/production_choices_right_verify.py` 比对部署 JS/CSS 哈希、检查新菜单及题目/试卷/关联表和教材元数据不变；未向正式库写入测试题目。
+- 正式核验通过，容器 healthy；本轮隔离容器和本地验收服务已清理，其他三个服务保持运行。宿主机更新前后 GitHub HTTPS 均为 200；未发现 xray_tun，不将其描述为 TUN 开启验收。没有修改代理、路由、DNS、WSL 或 Docker 网络配置。
+
+## 2026-10-15 每份试卷独立保存题图排版
+
+- 选题时将题库默认题图位置、尺寸及逐图排版复制到题篮；组卷调整普通配图继续更新题库默认，同时更新当前题篮。保存试卷时将排版快照存入该试卷元数据，其他已保存试卷不变。未改动原 MathBank 和 PhysicsBank 项目。
+- 重新载入、刷新浏览器、分页筛选、导出前重新核验题目均保留题篮快照；历史试卷快捷 PDF 导出也使用该卷的排版。保留题目存在性及权限校验；快照只隔离题图排版，不承诺冻结题目全文或图片文件内容。保存动作仍沿用原版新增试卷记录。
+- 旧卷在 worker 启动时按当时题库默认排版一次性固定，持久化前使用 SQLite 在线备份，位置为该分区 `data_backup/schema_snapshots/before-paper-layouts-*.db`。不改变上游 schema 版本，不覆盖已有快照。历史上没有保存的排版无法追溯恢复。正式库本次更新前共有 5 个已初始化分区、2 道题、0 份已存试卷，无旧卷需要迁移。
+- 平台与物理专项 **30 passed**，覆盖 A/B/C 试卷隔离、非法排版拒绝、旧卷备份与迁移幂等。扩展 Linux 回归 **950 passed，9 skipped**，包含分页与数据库迁移；JavaScript 语法检查通过。
+- `tests_platform/paper_layout_ui_smoke.py` 在隔离数据目录验证 A/B 位置与尺寸独立、刷新、再次保存、重新核验、快捷导出请求、写入失败回滚和新选题默认值，全部通过。账号管理浏览器验收通过，无 pageerror；Q&A 新增规则说明，目前 26 条。
+- `tests_platform/paper_layout_export_acceptance.py` 实际导出 A/B 两套 PDF、Word、LaTeX，六次均成功。A 为右侧小图，B 为居中大图；核对 PDF 图片坐标、Word 图片宽度与 LaTeX 排版参数，并查看渲染图。报告 `test-results/paper-layout-export-report.json`，截图 `paper-layout-A.png`、`paper-layout-B.png`。
+- 正式容器更新前注册导入任务为 0；保留原数据挂载和回退镜像 `mathbank-platform:before-paper-layout-20261015`。仅重建本项目容器，不改代理、TUN、DNS、路由、WSL 或 Docker 网络配置。正式部署核验脚本为 `test-results/production_paper_layout_verify.py`，检查全部分区初始化、页面脚本、Q&A、浏览器工作台及题目行/教材元数据不变。
+- 正式核验全部通过，容器 healthy，未向正式库写入测试题目或试卷。本次隔离容器与本地测试服务已停止清理；其他三个服务保持运行。部署前后宿主机 GitHub HTTPS 为 200，均未发现 xray_tun 网卡，因此不宣称在 TUN 开启状态下验收。
+
+## 2026-10-14 PhysicsBank 功能合并
+
+- 从本机 PhysicsBank 借鉴物理题型、识别与解题约束、绘图规则和普通试卷排版，适配到当前 MathBank 引擎。保留现有原文核对、公式锁、逐图验证及 Word/PDF 保真流程；两个原项目均未修改。来源见 `PHYSICSBANK-NOTICE.txt`、`physics-source-manifest.json`，有意修改的引擎文件见 `platform-adaptations.json`。
+- 每个 worker 使用可信的空间学科、学段与管理员元数据。物理识别/复核提示词补充单位大小写、方向与正负号、有效数字、坐标图、电路连接和实验数据约束；解题与绘图按学段学科生成指令，分类遵循管理员题型及难度。未进行真实模型质量验收。
+- 物理默认题型为单选、多选、填空、实验、计算、简答。计算题保留原 `detailed_answer` 编码，避免已有题目失去分类。仅对仍为原始四种题型的物理模板执行一次升级，自定义题型保持不变。
+- 物理和初中数学默认普通试卷；高中数学保留原版 19 题模板。物理录入标题、试卷标题、分组、预览及 PDF/Word 页眉页脚显示正确学科与题型。
+- 平台和物理专项：`test_platform.py`、`test_physics_profile.py` 合计 **29 passed**。扩展上游 Linux 回归 **915 passed，9 skipped**，包含组卷、Word 导出、自定义题型和教材保留。JavaScript 语法检查通过。
+- 独立数据目录中的物理浏览器工作流、账号管理及首次创建空间流程全部通过，无 pageerror；覆盖物理题型、普通试卷、数学隔离、手机与暗色。截图见 `test-results/physics-editor.png`、`physics-paper.png`、`physics-mobile.png`。
+- 实际三格式导出均 HTTP 200：LaTeX zip 3786 bytes、Word zip 72235 bytes、PDF 55980 bytes（1 页）。核对实验/计算/简答分组、可编辑 Word 公式、单位、有效数字与物理页眉页脚。样例与脚本见 `test-results/physics-export-*`、`tests_platform/physics_export_acceptance.py`。
+- 正式容器更新前注册导入任务为 0。保留原数据挂载，仅重建本项目容器；状态 healthy，登录、healthz、版本接口和真实浏览器物理录入/组卷验证通过。正式教材 ID 5 已升级为六题型；所有原有题目数量、教材目录及难度配置与更新前一致。正式验证未新增题目或测试账号。
+- 迁移前自动备份：`data/migration_backups/before-physics-types-1791991953559654618.db`。旧镜像保留为 `mathbank-platform:before-physics-20261014`；数据库迁移与镜像回退需分别处理。
+- 部署前后宿主机 GitHub HTTPS 均为 200；本轮未发现 xray_tun 网卡，不能宣称已在 TUN 开启状态下验收。未改动代理、路由、DNS、WSL 或 Docker 网络配置；其他三个服务保持运行。仅清理本次隔离验收容器和本地测试服务。
+
+
+## 2026-10-14 空间固定学科与切换器更新
+
+- 一个空间固定一个学科，内部按学段分区，各学段唯一教材。创建界面按学科展示可选学段与教材；空间所有者或管理员可后续启用学段。API、数据库触发器共同校验学科和教材一致性。
+- 桌面空间卡片分层展示名称、学科、空间类型、学段和教材；可搜索的选择面板兼容手机与暗色。手动/图片录入编辑器和文件导入页显示录入目的地。
+- 保存或解析进行中阻止切换。导入内容切换前提示；单题编辑沿用原版保存入库、存草稿、直接离开、返回编辑四种处理。浏览器验证 Escape 关闭选择器不关闭编辑器、返回编辑保留内容、存草稿后切换、返回原分区可读草稿。
+- 平台测试：15 passed；上游 Linux 核心回归：811 passed，7 skipped。本次回归未改动原版核心源码。
+- 隔离数据目录 `test-results/subject-ui-data` 的 `subject_ui_smoke.py`、`subject_editor_smoke.py`、`account_ui_smoke.py`、`onboarding_ui_smoke.py` 全部通过，无 pageerror。初中数学和物理模板仅为隔离测试数据，没有加入正式教材配置。
+- 正式空间 1、2 升级为数学空间，原分区 ID 1、2 和教材 ID 1 保留；没有搬移题库及图片。首次迁移自动备份 `data/migration_backups/before-space-subject-1791986156720116059.db`。旧版混合学科空间会明确停止迁移，避免静默分拆数据；当前正式数据没有此情况。
+- 更新前注册导入任务为 0。缓存镜像重新构建并仅重建本项目容器，运行状态 healthy。正式只读业务验证通过：登录、空间学科、选择器、录入目的地、手机布局、healthz 和原版版本接口；未创建测试账号、空间或题目。
+- 部署前后宿主机 GitHub HTTPS 均为 200。当前检查未发现 xray_tun 网卡，不能引用历史 Up 状态作为本轮 TUN 开启验证。没有改动 TUN、代理、路由、DNS、WSL 或 Docker 网络配置；未中断其他容器。
+- 正式截图：`test-results/production-space-card.png`、`production-space-picker.png`、`production-space-mobile.png`；隔离多学段/暗色截图：`subject-sidebar.png`、`subject-picker-mobile.png`、`subject-create-space.png`。
+- 未使用真实 AI 密钥进行识别质量测试；新增其他学段的正式教材仍由超级管理员维护。
+
+
+## 2026-10-14 界面融合更新
+
+- 登录页、账号和空间管理使用 MathBank 原版主题变量、字号、表面与控件样式；新增桌面侧栏和手机底栏“我的”。
+- “我的”包含我的账号、空间管理、团队与账号、教材与分类；后两项按管理员角色显示。共享管理片段为 `platform_app/web/account.html`，有空间用户在原版工作台内切换管理工作区，无空间用户复用相同界面完成首次创建。
+- 进入“我的”不发生页面导航；实测导入页未提交标题保留。切换到另一个空间仍会重新加载工作台，不能将两种动作混同。
+- `platform_app/web/qa-data.js` 是当前 25 条问答的内容源，替换旧群聊整理和单机维护说明；分类、关键词搜索、展开及重置已实测。
+- 平台集成测试重新运行：12 passed。Linux 上游核心回归重新运行：811 passed、7 skipped；原版业务源码未修改。
+- `tests_platform/account_ui_smoke.py` 在独立 `test-results/ui-data` 验证登录、嵌入式管理、录入字段保留、创建教师账号、创建共享空间、授予编辑权限、教师角色界面、修改密码与再次登录、Q&A 分类/搜索/重置、暗色模式及 390px 导航和弹窗，全部通过，无 pageerror。
+- `tests_platform/onboarding_ui_smoke.py` 验证无可访问空间的新教师账号、空态管理、Q&A 切换及创建首个个人空间，全部通过，无 pageerror。
+- 原 `tests_platform/browser_smoke.py` 同步适配登录后直接进入工作台的流程，再次验证导入、跨空间选题、试卷目录、设置保存及手机视图通过。
+- 五个新增/修改前端脚本通过 node --check。暗色截图核对了转换完成后的文字、输入框和按钮对比度。
+- 正式容器更新前已检查注册导入任务数为 0；使用原数据挂载更新。更新后 healthz 正常、原版版本接口为 2.7.0、真实浏览器登录和管理/Q&A 读取通过。还验证了旧分区明暗偏好迁移后，退出登录仍保持同一明暗模式。正式验证未创建测试账号、空间或题目。
+- 本次截图：`test-results/integrated-login.png`、`integrated-my-account.png`、`integrated-spaces.png`、`integrated-team.png`、`integrated-qa.png`、`integrated-my-dark.png`、`integrated-my-mobile.png`、`integrated-onboarding-mobile.png`。
+
+## 来源与实现
+
+- 从本机 MathBank 复制 369 个源码及资源文件，哈希清单为 `upstream-manifest.json`。
+- 最终复核原项目 369 个文件与清单完全一致，原项目未修改。
+- 初次复制仅有三处 Windows 兼容修正；现已加入物理学科适配，当前差异以 `platform-adaptations.json` 为准。测试同时核验原始清单和声明的适配哈希。
+- 账号、空间、权限、教材绑定、团队模型、来源及试卷目录由 `platform_app` 接入。Linux 字体和模板路径在 worker 运行时适配。
+
+## 初版已执行验证（后续结果见上方更新记录）
+
+| 项目 | 结果 | 范围 |
+| --- | --- | --- |
+| 平台集成测试 | 15 passed | 登录与 CSRF、独立 worker 边界、空间题目/图片隔离、团队权限、固定教材、AI 配置优先级与密钥遮罩、原版组卷、任务归属、跨空间快照与来源、多级目录 |
+| 上游核心回归（Linux） | 811 passed，7 skipped | PDF/Word 解析范围、版面与原文保真、数学内容、查重、图片生命周期、任务管理、预览等；在独立临时源码副本运行 |
+| 上游核心回归（Windows） | 800 passed，8 skipped，10 failed | 失败项为符号链接权限和长 node -e 命令限制；对应完整核心回归在 Linux 通过，不将 Windows 结果记为全绿 |
+| 浏览器工作流 | 通过，无 pageerror | 登录、原版导入页、跨空间选择及搜索、多级试卷目录创建、原版 AI 设置保存、账号学科草稿分区、390px 手机布局截图 |
+| LaTeX 导出 | HTTP 200，3217 bytes | 实际原版导出 zip |
+| Word 导出 | HTTP 200，71694 bytes | zip 中两份 docx；检查到可编辑 oMath 公式 |
+| PDF 导出 | HTTP 200，34320 bytes，1 页 | 实际 XeLaTeX 编译；渲染检查中文、数学公式、答案和页码 |
+| 正式实例 | healthy | 干净数据目录初始化后验证登录、原版工作台及题库读取 |
+| 源码基础检查 | 通过 | platform_app Python compileall |
+
+平台测试入口：`tests_platform/test_platform.py`。浏览器入口：`tests_platform/browser_smoke.py`。真实导出入口：`tests_platform/export_acceptance.py`。上游回归入口：`scripts/run_upstream_tests.py`。
+
+截图与导出样例位于 `test-results/`，包括 `mathbank-native-import.png`、`mathbank-native-mobile.png`、`mathbank-cross-space-picker.png`、`mathbank-native-settings.png`、`native-export-pdf.png` 及三种导出文件。测试题目及测试账号保存在独立验收数据目录，未写入正式题库。
+
+## Docker 与网络
+
+- 正式容器 `mathbank-platform-mathbank-1`，仅发布 `127.0.0.1:3010`；数据绑定到本目录 `data/`。
+- 本次使用 `test-results/Dockerfile.local-runtime` 组合已有缓存镜像构建并实际运行；根目录可移植 Dockerfile 尚未完成从官方基础镜像重新构建验收，两者不混称。
+- 正式镜像重新启动独立验收容器后，再次实际验证三种导出均通过，未依赖临时手工安装的容器状态。
+- Compose 自动分配 `10.240.2.0/24`；未修改引擎地址池或显式指定子网。
+- 原有三个 zhike-v2-test 容器保留运行。只清理本次验收容器。
+- 初版部署时曾核对 xray_tun 为 Up、宿主机 GitHub HTTPS 为 200；2026-10-14 本轮未发现该网卡，最新状态以上方记录为准。未改动 TUN、代理、Windows 路由、DNS、虚拟网卡或全局防火墙。
+
+## 尚未宣称完成的范围
+
+- 没有使用用户密钥发起真实 AI 识别质量测试；需要在新版设置中配置模型后以真实试卷验收。源码复刻和回归通过不等同于模型输出质量保证。
+- 原系统账号、题库、图片、密钥均未自动迁移。平台最初从干净数据目录建立，现在已有正式业务数据；初始账号信息见 `data/initial-admin.txt`，不得以测试初始化覆盖现有数据。
+- 讲义精细化按用户要求后置；当前主要完成原版 MathBank 核心体验和账号/空间层。
+- 已完成数学基础流程与物理专用规则、分类、界面及导出验收；真实 AI 对各学科试卷的识别与解题质量仍需实际样本验收。
+- Linux 使用开放字体替代 Windows 的 Times New Roman、Arial 和 Courier New；PDF 字形有少量差异。
+- worker 默认上限为 12，暂不自动淘汰持有导入状态的进程；大规模并发还需专项压测。

@@ -1,0 +1,3 @@
+# Store every file byte for byte: engine hashes (platform-adaptations.json)
+# and Windows launchers depend on the exact line endings.
+* -text

@@ -1,0 +1,234 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>MinerU 试用</title>
+<link rel="stylesheet" href="/lib/katex/katex.min.css">
+<style>
+  :root { --bg: #f5f7fb; --surface: #fff; --muted: #f8f9fc; --border: rgba(148,163,184,.3); --text: #1e293b; --sub: #64748b; --brand: #7c3aed; --ok: #059669; --bad: #dc2626; }
+  * { box-sizing: border-box; }
+  [hidden] { display: none !important; }
+  body { margin: 0; font: 14px/1.6 Inter, 'Microsoft YaHei', sans-serif; color: var(--text); background: var(--bg); }
+  header { display: flex; align-items: baseline; gap: 12px; padding: 14px 24px; background: var(--surface); border-bottom: 1px solid var(--border); }
+  header h1 { margin: 0; font-size: 18px; }
+  header p { margin: 0; color: var(--sub); font-size: 12px; }
+  .layout { display: grid; grid-template-columns: 340px 1fr; gap: 16px; padding: 16px 24px; align-items: start; }
+  .card { background: var(--surface); border: 1px solid var(--border); border-radius: 14px; padding: 16px; }
+  .card + .card { margin-top: 16px; }
+  h2 { font-size: 15px; margin: 0 0 10px; }
+  label { display: grid; gap: 4px; font-size: 12px; color: var(--sub); margin: 10px 0; }
+  label.check { display: flex; align-items: center; gap: 8px; color: var(--text); margin: 6px 0; }
+  input, select { font: inherit; padding: 7px 10px; border: 1px solid var(--border); border-radius: 9px; background: var(--muted); color: var(--text); min-width: 0; }
+  input[type=checkbox] { accent-color: var(--brand); }
+  .pair { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+  button { font: inherit; padding: 8px 14px; border-radius: 9px; border: 1px solid var(--border); background: var(--muted); cursor: pointer; }
+  button.primary { width: 100%; margin-top: 8px; background: var(--brand); border-color: var(--brand); color: #fff; }
+  button:disabled { opacity: .55; cursor: wait; }
+  .error { color: var(--bad); font-size: 12px; min-height: 18px; margin: 6px 0 0; }
+  .hint { color: var(--sub); font-size: 12px; margin: 4px 0 0; }
+  .runs button { display: block; width: 100%; text-align: left; margin-bottom: 6px; background: var(--surface); }
+  .runs button[aria-current=true] { border-color: var(--brand); background: rgba(124,58,237,.06); }
+  .runs small { display: block; color: var(--sub); }
+  .badge { display: inline-block; padding: 1px 8px; border-radius: 6px; font-size: 11px; font-weight: 600; background: rgba(124,58,237,.1); color: var(--brand); }
+  .badge.done { background: rgba(5,150,105,.1); color: var(--ok); }
+  .badge.failed { background: rgba(220,38,38,.1); color: var(--bad); }
+  .stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(110px, 1fr)); gap: 10px; margin: 12px 0; }
+  .stats div { background: var(--muted); border-radius: 10px; padding: 10px; }
+  .stats strong { display: block; font-size: 20px; }
+  .stats span { font-size: 12px; color: var(--sub); }
+  .tabs { display: flex; gap: 6px; margin: 8px 0; }
+  .tabs button[aria-pressed=true] { border-color: var(--brand); color: var(--brand); }
+  .compare { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; height: calc(100vh - 330px); min-height: 420px; }
+  .pane { overflow: auto; border: 1px solid var(--border); border-radius: 12px; background: var(--surface); padding: 12px; }
+  .pane img { max-width: 100%; }
+  .pages img { display: block; margin: 0 auto 12px; border: 1px solid var(--border); }
+  .markdown table { border-collapse: collapse; margin: 8px 0; }
+  .markdown td, .markdown th { border: 1px solid var(--border); padding: 4px 8px; }
+  .markdown .katex-error { background: rgba(220,38,38,.08); }
+  pre.source { white-space: pre-wrap; font: 12px/1.6 Consolas, monospace; margin: 0; }
+  .import { margin-top: 12px; font-size: 12px; color: var(--sub); }
+  .import code { color: var(--text); word-break: break-all; }
+  .empty { color: var(--sub); text-align: center; padding: 48px; }
+  @media (max-width: 900px) { .layout, .compare { grid-template-columns: 1fr; } .compare { height: auto; } }
+</style>
+</head>
+<body>
+<header><h1>MinerU 试用</h1><p>用你的 MinerU API Key 解析试卷，检查公式、配图和版面是否适合接入 MathBank。</p></header>
+<div class="layout">
+  <aside>
+    <form id="form" class="card">
+      <h2>新建解析</h2>
+      <label>API Key<input id="token" type="password" autocomplete="off" placeholder="在 mineru.net 的 API 管理页生成"></label>
+      <p class="hint" id="keyHint">Key 只保存在本机这个程序的内存里，不写入文件。</p>
+      <label>文件（PDF、图片、Word、PPT，≤200 MB）<input id="file" type="file" accept=".pdf,.png,.jpg,.jpeg,.webp,.bmp,.docx,.pptx" required></label>
+      <div class="pair">
+        <label>模型<select id="model"><option value="vlm">vlm（推荐）</option><option value="pipeline">pipeline</option></select></label>
+        <label>页码范围<input id="pages" placeholder="全部，或 1-3,5"></label>
+      </div>
+      <label class="check"><input id="ocr" type="checkbox">强制 OCR（扫描件、拍照件）</label>
+      <label class="check"><input id="formula" type="checkbox" checked>识别公式</label>
+      <label class="check"><input id="table" type="checkbox" checked>识别表格</label>
+      <button class="primary" id="submit">开始解析</button>
+      <p class="error" id="formError" role="alert"></p>
+    </form>
+    <section class="card">
+      <h2>解析记录</h2>
+      <div class="runs" id="runs"><p class="hint">还没有记录。</p></div>
+      <p class="hint" id="runsDir"></p>
+    </section>
+  </aside>
+  <main class="card" id="view"><p class="empty">选择左侧记录，或上传一份试卷开始解析。</p></main>
+</div>
+<script src="/lib/marked/marked.min.js"></script>
+<script src="/lib/dompurify/purify.min.js"></script>
+<script src="/lib/katex/katex.min.js"></script>
+<script>
+(() => {
+  'use strict';
+  const $ = id => document.getElementById(id);
+  const STATES = {uploading: '上传中', uploaded: '已上传', 'waiting-file': '等待文件', pending: '排队中', running: '解析中',
+                  converting: '整理结果', downloading: '下载结果', done: '完成', failed: '失败'};
+  let runsDir = '', current = null, timer = null;
+
+  function el(tag, text = '', className = '') {
+    const node = document.createElement(tag);
+    node.textContent = text;
+    if (className) node.className = className;
+    return node;
+  }
+  async function json(url, options) {
+    const response = await fetch(url, options);
+    const value = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(value.detail || '请求失败');
+    return value;
+  }
+  const badge = state => el('span', STATES[state] || state, 'badge ' + (['done', 'failed'].includes(state) ? state : ''));
+
+  // Keep LaTeX away from the Markdown parser, then render it with KaTeX.
+  function renderMarkdown(target, text, base) {
+    const math = [];
+    const keep = (tex, display) => `@@MATH${math.push({tex, display}) - 1}@@`;
+    let source = text.replace(/\$\$([\s\S]+?)\$\$/g, (_, tex) => keep(tex, true))
+      .replace(/\\\[([\s\S]+?)\\\]/g, (_, tex) => keep(tex, true))
+      .replace(/(?<!\\)\$([^$\n]+?)\$/g, (_, tex) => keep(tex, false))
+      .replace(/\\\((.+?)\\\)/g, (_, tex) => keep(tex, false));
+    let html = DOMPurify.sanitize(marked.parse(source));
+    html = html.replace(/@@MATH(\d+)@@/g, (_, i) =>
+      katex.renderToString(math[i].tex, {displayMode: math[i].display, throwOnError: false}));
+    target.innerHTML = html;
+    target.querySelectorAll('img').forEach(img => {
+      const src = img.getAttribute('src') || '';
+      if (!/^(https?:|data:|\/)/.test(src)) img.src = base + src;
+    });
+    return target.querySelectorAll('.katex-error').length;
+  }
+
+  function stat(value, label) {
+    const box = el('div');
+    box.append(el('strong', value ?? '—'), el('span', label));
+    return box;
+  }
+  async function show(run) {
+    current = run.id;
+    document.querySelectorAll('#runs button').forEach(b => b.setAttribute('aria-current', String(b.dataset.id === run.id)));
+    const view = $('view');
+    view.replaceChildren();
+    const title = el('h2', run.file + ' ');
+    title.append(badge(run.state));
+    const o = run.options;
+    view.append(title, el('p', `${o.model_version} · ${o.is_ocr ? '强制 OCR' : '自动判断 OCR'} · 公式${o.enable_formula ? '开' : '关'} · 表格${o.enable_table ? '开' : '关'}${o.page_ranges ? ' · 第 ' + o.page_ranges + ' 页' : ''} · ${run.created}`, 'hint'));
+    if (run.state === 'failed') view.append(el('p', run.error, 'error'));
+    if (run.state !== 'done') {
+      if (run.state !== 'failed') view.append(el('p', `${STATES[run.state] || run.state}${run.total ? `：已解析 ${run.extracted || 0} / ${run.total} 页` : ''}${run.elapsed ? `，已用 ${run.elapsed} 秒` : ''}`, 'hint'));
+      return;
+    }
+    const base = `/runs/${encodeURIComponent(run.id)}/`;
+    const markdownBase = base + run.summary.markdown.replace(/[^/]*$/, '');
+    const text = await (await fetch(base + run.summary.markdown)).text();
+    const s = run.summary;
+    const stats = el('div', '', 'stats');
+    const failedMath = stat('…', 'KaTeX 无法渲染');
+    stats.append(stat(run.total, '页数'), stat(run.elapsed + ' 秒', '总耗时'), stat(s.display_formulas, '行间公式'),
+                 stat(s.inline_formulas, '行内公式'), stat(s.images, '图片'), stat(s.tables, '表格'), failedMath);
+    const tabs = el('div', '', 'tabs');
+    const compare = el('div', '', 'compare');
+    const pages = el('div', '', 'pane pages');
+    const rendered = el('div', '', 'pane markdown');
+    if (run.pages.length) run.pages.forEach(name => { const img = el('img'); img.loading = 'lazy'; img.src = base + name; pages.append(img); });
+    else pages.append(el('p', '此格式没有原文预览。', 'hint'));
+    compare.append(pages, rendered);
+    const raw = el('pre', text, 'pane source');
+    raw.hidden = true;
+    for (const [label, showRaw] of [['对照原文', false], ['Markdown 源码', true]]) {
+      const button = el('button', label);
+      button.type = 'button';
+      button.setAttribute('aria-pressed', String(!showRaw));
+      button.onclick = () => {
+        tabs.querySelectorAll('button').forEach(b => b.setAttribute('aria-pressed', String(b === button)));
+        compare.hidden = showRaw;
+        raw.hidden = !showRaw;
+      };
+      tabs.append(button);
+    }
+    const help = el('div', '', 'import');
+    help.append('导入 MathBank 测试（如 3011）：在导入中心上传 ',
+                el('code', `${runsDir}\\${run.id}\\${s.markdown.replace(/\//g, '\\')}`),
+                '，再从 ', el('code', s.images_dir), ' 选择配图（每次最多 20 张），看拆题、公式和配图是否正确。');
+    view.append(stats, tabs, compare, raw, help);
+    failedMath.querySelector('strong').textContent = renderMarkdown(rendered, text, markdownBase);
+  }
+  async function loadRuns(select) {
+    const list = await json('/api/runs');
+    const box = $('runs');
+    box.replaceChildren();
+    if (!list.length) box.append(el('p', '还没有记录。', 'hint'));
+    for (const run of list) {
+      const button = el('button');
+      button.type = 'button';
+      button.dataset.id = run.id;
+      const name = el('span', run.file + ' ');
+      name.append(badge(run.state));
+      button.append(name, el('small', `${run.options.model_version} · ${run.created}${run.elapsed ? ' · ' + run.elapsed + ' 秒' : ''}`));
+      button.onclick = () => follow(run.id);
+      box.append(button);
+    }
+    if (select) follow(select);
+  }
+  async function follow(id) {
+    clearTimeout(timer);
+    const run = await json('/api/runs/' + encodeURIComponent(id));
+    await show(run);
+    if (!['done', 'failed'].includes(run.state)) timer = setTimeout(() => follow(id), 2000);
+    else loadRuns();
+  }
+
+  $('form').onsubmit = async event => {
+    event.preventDefault();
+    $('formError').textContent = '';
+    $('submit').disabled = true;
+    const data = new FormData();
+    data.append('file', $('file').files[0]);
+    data.append('token', $('token').value);
+    data.append('model_version', $('model').value);
+    data.append('page_ranges', $('pages').value);
+    for (const [field, id] of [['is_ocr', 'ocr'], ['enable_formula', 'formula'], ['enable_table', 'table']]) data.append(field, String($(id).checked));
+    try {
+      const run = await json('/api/runs', {method: 'POST', body: data});
+      await loadRuns(run.id);
+    } catch (error) {
+      $('formError').textContent = error.message;
+    } finally {
+      $('submit').disabled = false;
+    }
+  };
+  json('/api/config').then(config => {
+    runsDir = config.runs_dir;
+    $('runsDir').textContent = '结果保存在 ' + runsDir;
+    if (config.env_key) { $('token').placeholder = '已从环境变量 MINERU_API_KEY 读取，可留空'; }
+  });
+  loadRuns();
+})();
+</script>
+</body>
+</html>

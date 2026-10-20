@@ -1,0 +1,26 @@
+# MathBank 账号与空间版，本机 http://localhost:3011 。
+# 项目名固定为 mathbank（不随目录名变化），只管理名为 mathbank 的容器。
+# 更新代码：docker compose up -d --build（基于 mathbank:base，只替换代码，见 deploy/Dockerfile）。
+name: mathbank
+services:
+  mathbank:
+    build:
+      context: .
+      dockerfile: deploy/Dockerfile
+    image: mathbank:current
+    container_name: mathbank
+    init: true
+    ports:
+      - "127.0.0.1:3011:3010"
+    environment:
+      MATHBANK_PLATFORM_DATA: /data
+      MATHBANK_MAX_WORKERS: "12"
+    volumes:
+      - ./data:/data
+    restart: unless-stopped
+    stop_grace_period: 30s
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:3010/healthz',timeout=3)"]
+      interval: 20s
+      timeout: 5s
+      retries: 3

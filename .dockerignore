@@ -1,0 +1,16 @@
+data
+.venv
+.pytest_cache
+**/__pycache__
+**/.env
+**/*.db
+**/*.db-wal
+**/*.db-shm
+**/uploads
+**/test_uploads
+**/.system_generated
+**/data_backup
+test-results/*
+!test-results/linux-wheels
+!test-results/linux-wheels/**
+!test-results/Dockerfile.acceptance

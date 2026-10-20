@@ -1,0 +1,22 @@
+# Business data, test output and anything that may hold credentials stay out of Git.
+data/
+test-results/
+.env
+.env.*
+!**/.env.example
+**/uploads/
+**/test_uploads/
+**/data_backup/
+**/.system_generated/
+*.db
+*.db-wal
+*.db-shm
+*.log
+
+# Python and tooling caches
+__pycache__/
+*.pyc
+.pytest_cache/
+.venv/
+.DS_Store
+Thumbs.db

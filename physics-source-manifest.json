@@ -1,0 +1,11 @@
+{
+  "mathbank/prompts.py": "66082fc529040ac58726b622af3213cec62eb134279df6dfda072d603bebf0b4",
+  "mathbank/curriculums.py": "526bf2965db9a8fb243ef87a972a5f1138defb529c6037f1299c2b6e4959cc08",
+  "mathbank/pdf_source_verify.py": "bcce5e87b44ab847c892e2ec5afe320311d7eeed8db5af7882543b2e3795b64d",
+  "mathbank/content_locks.py": "5f32c64204f31d9286c2404556f56ac9b58bd0e2d156cac0a609c8f22ce36728",
+  "mathbank/pdf_inspector_helper.py": "b3a876c05907ed7b4e79e3de277598314a61f0538f0c2db74ea0824cccb92fa0",
+  "main.py": "491c412373cfa933dceb00f6d4064374826135c828a165d5f907f77fc90b346b",
+  "static/js/paper.js": "40d42c5c8f5347a39d332e721953d3b4e9296da6a6a3a3bec1bd0e973def1699",
+  "mathbank/paper_helper.py": "d9e283f965d96d80188f9c2940caf9796446bb8c22ec010388f694d13b76214f",
+  "tests/test_physics_adaptation.py": "5633413283fc0c16370cadb3eefbf78e506526ec832b0457c07747d8483b65bc"
+}

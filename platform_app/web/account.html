@@ -1,0 +1,113 @@
+<section id="mineWorkspaceSection" class="mb-account hidden" aria-labelledby="mineTitle">
+  <div class="mb-account-inner">
+    <div class="mb-account-heading">
+      <div><h1 id="mineTitle">我的</h1><p>账号、备课空间与团队协作。</p></div>
+      <button type="button" id="mineHelp" class="mb-button"><i class="fa-regular fa-circle-question" aria-hidden="true"></i>使用帮助</button>
+    </div>
+    <div id="accountNotice" class="mb-notice" role="status" aria-live="polite" hidden></div>
+    <nav class="mb-tabs" aria-label="我的管理分类">
+      <button type="button" data-mine-tab="profile" aria-current="page">我的账号</button>
+      <button type="button" data-mine-tab="spaces">空间</button>
+      <button type="button" data-mine-tab="team" hidden>团队与账号</button>
+      <button type="button" data-mine-tab="books" hidden>教材</button>
+    </nav>
+
+    <section data-mine-panel="profile" aria-label="我的账号">
+      <article class="mb-card mb-profile">
+        <div id="accountAvatar" class="mb-avatar" aria-hidden="true">我</div>
+        <div><h2 id="accountName"></h2><p id="accountIdentity"></p><span id="accountRole" class="mb-badge"></span></div>
+        <button type="button" id="logoutButton" class="mb-button"><i class="fa-solid fa-arrow-right-from-bracket" aria-hidden="true"></i>退出登录</button>
+      </article>
+      <div class="mb-columns">
+        <article class="mb-card">
+          <h2>当前空间</h2>
+          <dl class="mb-facts">
+            <div><dt>所属团队</dt><dd id="accountTeam"></dd></div>
+            <div><dt>空间</dt><dd id="accountSpace"></dd></div>
+            <div><dt>学科学段</dt><dd id="accountSubject"></dd></div>
+            <div><dt>教材</dt><dd id="accountTextbook"></dd></div>
+          </dl>
+          <button type="button" class="mb-button" data-open-spaces>查看全部空间<i class="fa-solid fa-arrow-right" aria-hidden="true"></i></button>
+        </article>
+        <form id="passwordForm" class="mb-card">
+          <h2>修改密码</h2>
+          <p>修改后需要重新登录，已入库题目不受影响。</p>
+          <label>原密码<input name="old" type="password" autocomplete="current-password" required></label>
+          <label>新密码<input name="new" type="password" aria-label="新密码" autocomplete="new-password" minlength="10" maxlength="200" required><small>至少 10 个字符</small></label>
+          <button class="mb-button mb-primary">修改并重新登录</button>
+        </form>
+      </div>
+      <article class="mb-card mb-tip"><i class="fa-regular fa-bookmark" aria-hidden="true"></i><div><h3>草稿留在当前浏览器</h3><p>草稿与题篮按账号和空间分别保存在本机浏览器，换设备不会同步。切换空间前请先保存草稿或正式入库。</p></div></article>
+    </section>
+
+    <section data-mine-panel="spaces" aria-label="空间" hidden>
+      <div class="mb-section-heading">
+        <div><h2>空间</h2><p>每个空间对应一个学科、一个学段和一套教材，创建后不能更改。需要其他学段时请另建空间。</p></div>
+        <button type="button" class="mb-button mb-primary" id="newSpace"><i class="fa-solid fa-plus" aria-hidden="true"></i>新建空间</button>
+      </div>
+      <div id="spaces"></div>
+    </section>
+
+    <section data-mine-panel="team" aria-label="团队与账号" hidden>
+      <div class="mb-section-heading">
+        <div><h2>团队与账号</h2><p>账号由管理员创建，没有自助注册。共享空间的编辑权限在“空间”中按成员设置。</p></div>
+        <button type="button" class="mb-button mb-primary" id="newUser"><i class="fa-solid fa-user-plus" aria-hidden="true"></i>创建账号</button>
+      </div>
+      <div id="users" class="mb-list"></div>
+      <form id="teamForm" class="mb-card mb-team-form" hidden>
+        <h2>新建团队</h2>
+        <div class="mb-inline-form"><label>团队名称<input name="name" maxlength="80" required></label><button class="mb-button">创建团队</button></div>
+      </form>
+    </section>
+
+    <section data-mine-panel="books" aria-label="教材" hidden>
+      <div class="mb-section-heading">
+        <div><h2>教材</h2><p>新建空间时按学科、学段选择教材。教材目录创建后不再修改；停用只影响新建空间，已有空间照常使用。</p></div>
+        <button type="button" class="mb-button mb-primary" id="newBook"><i class="fa-solid fa-plus" aria-hidden="true"></i>新增教材</button>
+      </div>
+      <div id="books" class="mb-list"></div>
+    </section>
+  </div>
+
+  <dialog id="spaceDialog" class="mb-dialog" aria-labelledby="spaceDialogTitle"><form id="spaceForm">
+    <div class="mb-dialog-heading"><div><h2 id="spaceDialogTitle" tabindex="-1"><i class="fa-solid fa-layer-group" aria-hidden="true"></i>新建空间</h2><p>学科、学段与教材创建后固定。</p></div><button type="button" data-close class="mb-icon-button" aria-label="关闭"><i class="fa-solid fa-xmark" aria-hidden="true"></i></button></div>
+    <label>空间名称<input name="name" required maxlength="80" placeholder="例如：高一数学备课组"></label>
+    <label>空间类型<select name="kind" id="spaceKind" aria-label="空间类型"><option value="personal">个人空间</option><option value="team">团队共享空间</option><option value="public">平台公共空间</option></select></label>
+    <label>学科 · 学段 · 教材<select name="textbook_id" id="spaceBook" aria-label="学科 · 学段 · 教材" required></select></label>
+    <p class="mb-dialog-error" role="alert" hidden></p>
+    <div class="mb-actions"><button type="button" class="mb-button" data-close>取消</button><button class="mb-button mb-primary">创建并进入</button></div>
+  </form></dialog>
+
+  <dialog id="renameDialog" class="mb-dialog" aria-labelledby="renameDialogTitle"><form id="renameForm">
+    <div class="mb-dialog-heading"><div><h2 id="renameDialogTitle" tabindex="-1"><i class="fa-solid fa-pen" aria-hidden="true"></i>重命名空间</h2></div><button type="button" data-close class="mb-icon-button" aria-label="关闭"><i class="fa-solid fa-xmark" aria-hidden="true"></i></button></div>
+    <input name="space_id" type="hidden">
+    <label>新名称<input name="name" required maxlength="80"></label>
+    <p class="mb-dialog-error" role="alert" hidden></p>
+    <div class="mb-actions"><button type="button" class="mb-button" data-close>取消</button><button class="mb-button mb-primary">保存</button></div>
+  </form></dialog>
+
+  <dialog id="memberDialog" class="mb-dialog" aria-labelledby="memberDialogTitle"><div class="mb-dialog-heading"><div><h2 id="memberDialogTitle" tabindex="-1"><i class="fa-solid fa-user-group" aria-hidden="true"></i>成员权限</h2><p id="memberSpaceName"></p></div><button type="button" data-close class="mb-icon-button" aria-label="关闭"><i class="fa-solid fa-xmark" aria-hidden="true"></i></button></div>
+    <div class="mb-dialog-body"><p>同团队成员默认可查看；授予编辑后可共同录题、组卷和管理试卷目录。修改即时生效。</p><div id="memberList" class="mb-list"></div><p class="mb-dialog-error" role="alert" hidden></p></div>
+  </dialog>
+
+  <dialog id="userDialog" class="mb-dialog" aria-labelledby="userDialogTitle"><form id="userForm">
+    <div class="mb-dialog-heading"><div><h2 id="userDialogTitle" tabindex="-1"><i class="fa-solid fa-user" aria-hidden="true"></i>创建账号</h2><p id="userDialogHint"></p></div><button type="button" data-close class="mb-icon-button" aria-label="关闭"><i class="fa-solid fa-xmark" aria-hidden="true"></i></button></div>
+    <input name="id" type="hidden">
+    <label data-create-only>账号<input name="username" aria-label="账号" autocomplete="off" pattern="[A-Za-z0-9_.\-]{3,50}"><small>3–50 位字母、数字、点、下划线或短横线</small></label>
+    <label>姓名<input name="display_name" required maxlength="80"></label>
+    <div class="mb-field-pair" data-super-only><label>团队<select name="team_id" id="teamSelect" aria-label="团队"></select></label><label>角色<select name="role" aria-label="角色"><option value="member">教师</option><option value="team_admin">团队管理员</option></select></label></div>
+    <label><span id="userPasswordLabel">初始密码</span><input name="password" type="password" aria-labelledby="userPasswordLabel" autocomplete="new-password" minlength="10" maxlength="200"><small id="userPasswordHint">至少 10 个字符，请线下交给本人</small></label>
+    <label class="mb-check" data-edit-only><input name="enabled" type="checkbox">账号可登录（停用后立即退出所有登录）</label>
+    <p class="mb-dialog-error" role="alert" hidden></p>
+    <div class="mb-actions"><button type="button" class="mb-button" data-close>取消</button><button class="mb-button mb-primary">保存</button></div>
+  </form></dialog>
+
+  <dialog id="bookDialog" class="mb-dialog mb-wide" aria-labelledby="bookDialogTitle"><form id="bookForm">
+    <div class="mb-dialog-heading"><div><h2 id="bookDialogTitle" tabindex="-1"><i class="fa-solid fa-book" aria-hidden="true"></i>新增教材</h2><p>目录、题型与年级以 JSON 填写；难度固定为 1–5 级。保存后目录不再修改。</p></div><button type="button" data-close class="mb-icon-button" aria-label="关闭"><i class="fa-solid fa-xmark" aria-hidden="true"></i></button></div>
+    <div class="mb-field-triple"><label>学段<input name="stage" placeholder="高中" required maxlength="80"></label><label>学科<input name="subject" placeholder="数学" required maxlength="80"></label><label>教材名称<input name="name" placeholder="人教A版" required maxlength="80"></label></div>
+    <label>从已有教材复制目录<select id="bookTemplate" aria-label="从已有教材复制目录"></select></label>
+    <label>教材目录、题型、年级（JSON）<textarea id="bookMetadata" rows="16" required spellcheck="false"></textarea></label>
+    <p class="mb-dialog-error" role="alert" hidden></p>
+    <div class="mb-actions"><button type="button" class="mb-button" data-close>取消</button><button class="mb-button mb-primary">保存教材</button></div>
+  </form></dialog>
+</section>

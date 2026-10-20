@@ -1,0 +1,130 @@
+% MathBank 讲义版式：教材风格，一套固定版式。
+% Loaded after the exam-zh class (which keeps choices, \fillin and \paren for
+% bank questions). Colours, fonts, spacing and numbering live only here; the
+% Word export (platform_app/handout_export.py) mirrors the same values.
+\NeedsTeXFormat{LaTeX2e}
+\ProvidesPackage{mathbank-handout}[2026/10/20 MathBank textbook-style handouts]
+
+\RequirePackage{xcolor}
+\RequirePackage[most]{tcolorbox}
+\RequirePackage{enumitem}
+\RequirePackage{fancyhdr}
+\RequirePackage{geometry}
+
+% ---------- Palette ----------
+\definecolor{mbAccent}{HTML}{A51C30}   % 哈佛深红：讲次、小节号、定义、例题标签
+\definecolor{mbInk}{HTML}{212529}
+\definecolor{mbMuted}{HTML}{6C757D}
+\definecolor{mbTint}{HTML}{FAF4F5}     % 定义块浅底
+\definecolor{mbPanel}{HTML}{F5F6F8}    % 学习目标、小结底色
+\definecolor{mbRule}{HTML}{DADCE0}
+
+% ---------- Page and type ----------
+\geometry{a4paper, top=24mm, bottom=22mm, left=22mm, right=22mm, headheight=14pt, headsep=7mm, footskip=10mm}
+\setCJKmainfont{Noto Serif CJK SC}
+\setCJKsansfont{Noto Sans CJK SC}
+\linespread{1.32}
+\setlength{\parskip}{3pt plus 1pt}
+\color{mbInk}
+\newcommand\mbsans{\sffamily\bfseries}
+
+% ---------- Running heads ----------
+\newcommand\mbrunningleft{}
+\newcommand\mbrunningright{}
+\fancypagestyle{mbbody}{%
+  \fancyhf{}%
+  \fancyhead[L]{\small\sffamily\color{mbMuted}\mbrunningleft}%
+  \fancyhead[R]{\small\sffamily\color{mbMuted}\mbrunningright}%
+  \fancyfoot[C]{\small\sffamily\color{mbMuted}\thepage}%
+  \renewcommand\headrulewidth{0.4pt}%
+  \renewcommand\headrule{{\color{mbRule}\hrule height\headrulewidth}}%
+  \renewcommand\footrulewidth{0pt}}
+\fancypagestyle{mbfirst}{%
+  \fancyhf{}%
+  \fancyfoot[C]{\small\sffamily\color{mbMuted}\thepage}%
+  \renewcommand\headrulewidth{0pt}\renewcommand\footrulewidth{0pt}}
+
+% ---------- Sections: 1, 2, 3 with the number in the accent colour ----------
+\renewcommand\thesection{\arabic{section}}
+\ctexset{
+  section = {
+    format = \raggedright\mbsans\fontsize{15}{20}\selectfont\color{mbInk},
+    name = {,},
+    number = {\textcolor{mbAccent}{\arabic{section}}},
+    aftername = \hspace{0.75em},
+    beforeskip = {20pt plus 4pt minus 2pt},
+    afterskip = {8pt plus 2pt},
+  },
+}
+
+% One counter for definitions, theorems, examples and figures, per section: 1.1, 1.2 ...
+\newcounter{mbitem}[section]
+\renewcommand\thembitem{\arabic{section}.\arabic{mbitem}}
+\newcommand\mbtitlepart[1]{\if\relax\detokenize{#1}\relax\else\hspace{0.45em}{\mbsans #1}\fi}
+
+% ---------- Heading ----------
+% #1 讲次  #2 标题  #3 副标题  #4 学科学段与教材
+\newcommand\mbheading[4]{%
+  \thispagestyle{mbfirst}%
+  \begingroup\raggedright
+  \if\relax\detokenize{#1}\relax\else{\mbsans\fontsize{11}{14}\selectfont\color{mbAccent}#1}\par\vspace{5pt}\fi
+  {\mbsans\fontsize{22}{29}\selectfont\color{mbInk}#2}\par
+  \if\relax\detokenize{#3}\relax\else\vspace{4pt}{\fontsize{12.5}{17}\selectfont\color{mbMuted}#3}\par\fi
+  \vspace{8pt}{\color{mbAccent}\rule{\linewidth}{0.9pt}}\par\vspace{3pt}
+  {\small\sffamily\color{mbMuted}#4}\par
+  \endgroup\vspace{10pt}}
+
+\newenvironment{mbobjectives}{%
+  \begin{tcolorbox}[enhanced, breakable, colback=mbPanel, colframe=mbPanel, boxrule=0pt, arc=0pt,
+    left=12pt, right=12pt, top=8pt, bottom=8pt, before skip=4pt, after skip=10pt]
+  {\mbsans\color{mbAccent}学习目标}\par\vspace{2pt}
+  \begin{enumerate}[label={\sffamily\color{mbMuted}\arabic*}, leftmargin=1.6em, itemsep=1pt, topsep=2pt]}
+  {\end{enumerate}\end{tcolorbox}}
+
+% ---------- Blocks ----------
+% 定义：浅底 + 左侧深红竖条。
+\newtcolorbox{mbdefinition}[1]{enhanced, breakable, colback=mbTint, colframe=mbAccent, boxrule=0pt,
+  leftrule=2.4pt, arc=0pt, outer arc=0pt, left=11pt, right=11pt, top=7pt, bottom=7pt,
+  before skip=9pt, after skip=9pt,
+  before upper={\refstepcounter{mbitem}{\mbsans\color{mbAccent}定义~\thembitem}\mbtitlepart{#1}\quad}}
+% 定理、性质、公式、推论：细边框。#1 名称 #2 标题
+\newtcolorbox{mbtheorem}[2]{enhanced, breakable, colback=white, colframe=mbRule, boxrule=0.6pt, arc=2pt,
+  left=11pt, right=11pt, top=7pt, bottom=7pt, before skip=9pt, after skip=9pt,
+  before upper={\refstepcounter{mbitem}{\mbsans\color{mbInk}#1~\thembitem}\mbtitlepart{#2}\quad}}
+\newenvironment{mbproof}
+  {\par\addvspace{4pt}\noindent{\mbsans\color{mbMuted}证明}\quad\ignorespaces}
+  {\nobreak\hfill$\square$\par\addvspace{6pt}}
+% 注、方法、易错：左侧细线 + 小标签。#1 标签 #2 标签颜色
+\newtcolorbox{mbnote}[2]{blanker, breakable, borderline west={1pt}{0pt}{#2!55}, left=10pt,
+  before skip=8pt, after skip=8pt, before upper={{\mbsans\small\color{#2}#1}\quad}}
+\newtcolorbox{mbsummary}{enhanced, breakable, colback=mbPanel, colframe=mbPanel, boxrule=0pt, arc=0pt,
+  borderline north={0.8pt}{0pt}{mbAccent}, borderline south={0.8pt}{0pt}{mbAccent},
+  left=12pt, right=12pt, top=8pt, bottom=8pt, before skip=12pt, after skip=10pt,
+  before upper={{\mbsans\color{mbAccent}本节小结}\par\vspace{3pt}}}
+
+% 例题：深红标签与题干同行（题干旁有配图时标签随题干进左栏）；解答带左侧细线。
+\newenvironment{mbexample}{\par\addvspace{10pt}\noindent\ignorespaces}{\par\addvspace{6pt}}
+\newcommand\mbexamplelabel[1]{\refstepcounter{mbitem}{\mbsans\color{mbAccent}例~\thembitem}\mbtitlepart{#1}\quad}
+\newtcolorbox{mbsolution}{blanker, breakable, borderline west={0.8pt}{0pt}{mbRule}, left=12pt,
+  before skip=5pt, after skip=8pt, before upper={{\mbsans\color{mbAccent}解}\quad}}
+\newcommand\mbanswerspace[1]{\par\vspace*{#1cm}}
+
+% 练习：小标题 + 编号题目。
+\newenvironment{mbexercises}[1]
+  {\par\addvspace{12pt}\mbneedspace{8\baselineskip}\noindent{\mbsans\fontsize{12}{16}\selectfont\color{mbInk}#1}\par\nopagebreak\vspace{3pt}
+   \begin{enumerate}[label={\mbsans\arabic*.}, leftmargin=2em, labelsep=0.6em, itemsep=7pt, topsep=3pt]}
+  {\end{enumerate}}
+
+% 插图：居中，图注在下。
+\newcommand\mbfigure[2]{\par\addvspace{6pt}\begin{center}#1\par\vspace{4pt}%
+  \refstepcounter{mbitem}{\small\sffamily\color{mbMuted}图~\thembitem\if\relax\detokenize{#2}\relax\else\quad #2\fi}%
+  \end{center}\addvspace{4pt}}
+
+% 参考答案（教师版，讲义末尾）。A heading never stays alone at a page foot.
+% The space after \dimen0 ends the register number, so \newpage (and its own
+% conditionals) is not expanded while \ifdim is still reading its comparison.
+\newcommand\mbneedspace[1]{\par\penalty-100\begingroup\dimen0=#1\relax
+  \ifdim\pagegoal<\maxdimen\ifdim\dimexpr\pagegoal-\pagetotal\relax<\dimen0 \newpage\fi\fi\endgroup}
+\newcommand\mbanswersheading{\par\addvspace{20pt}\mbneedspace{7\baselineskip}\noindent{\color{mbAccent}\rule{\linewidth}{0.9pt}}\par\vspace{6pt}
+  \noindent{\mbsans\fontsize{15}{20}\selectfont\color{mbInk}参考答案}\par\vspace{6pt}}
+\newcommand\mbanswergroup[1]{\par\addvspace{8pt}\mbneedspace{3\baselineskip}\noindent{\mbsans\color{mbAccent}#1}\par\nopagebreak\vspace{2pt}}
