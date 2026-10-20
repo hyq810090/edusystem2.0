@@ -100,6 +100,8 @@ def create_app():
     engine.LOCAL_TOKEN=os.environ['MATHBANK_WORKER_SECRET']
     from platform_app import handout_export
     handout_export.register(engine)
+    from platform_app import mineru_fastpath
+    mineru_fastpath.register(engine)
     from starlette.responses import JSONResponse
     active_requests=0
     @engine.app.middleware('http')

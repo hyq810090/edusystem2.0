@@ -99,6 +99,15 @@
         ocr.checked = true;
         const ocrLabel = el('label', '', 'mb-check');
         ocrLabel.append(ocr, '强制 OCR（扫描件建议勾选，可避开 PDF 里错误的隐藏文字层）');
+        // Fast parse (platform_app/mineru_fastpath.py): remembered per account and space.
+        const fast = el('input');
+        fast.type = 'checkbox';
+        fast.id = 'mineruFastParse';
+        const remembered = () => localStorage.getItem('mb-mineru-fast') !== '0';
+        fast.checked = remembered();
+        fast.onchange = () => localStorage.setItem('mb-mineru-fast', fast.checked ? '1' : '0');
+        const fastLabel = el('label', '', 'mb-check');
+        fastLabel.append(fast, '快速拆题：题文保留 MinerU 原文，AI 只判断哪些是题并分类（推荐，明显更快；切不准时自动改用整卷拆题）');
         const status = el('p', '', 'mb-status');
         status.setAttribute('role', 'status');
         const actions = el('div', '', 'mb-actions');
@@ -107,8 +116,8 @@
         cancel.onclick = () => node.close();
         const submit = el('button', '开始解析', 'mb-button mb-primary');
         actions.append(cancel, submit);
-        form.append(fileLabel, pair, ocrLabel, status, actions);
-        form.addEventListener('reset', () => { setTimeout(() => { ocr.checked = true; }); });
+        form.append(fileLabel, pair, ocrLabel, fastLabel, status, actions);
+        form.addEventListener('reset', () => { setTimeout(() => { ocr.checked = true; fast.checked = remembered(); }); });
         form.onsubmit = async event => {
             event.preventDefault();
             const chosen = file.files[0];
@@ -148,7 +157,7 @@
         const {markdown, mapping, report, origin} = job.result;
         const textName = `${job.title || 'MinerU'}.md`;
         // The original paper stays beside the questions; 识别文本 shows the Markdown.
-        ctx.mineru = {mapping, origin: origin ? {
+        ctx.mineru = {mapping, fast: localStorage.getItem('mb-mineru-fast') !== '0', origin: origin ? {
             name: job.file, textName, url: `${base}/${job.id}/origin`,
             type: /\.(png|jpe?g|webp|bmp)$/i.test(job.file) ? 'image' : 'pdf',
             summary: `${report.questions} 处题号 · ${report.figures} 张配图 · ${report.picture_option_questions} 道图片选项题`,
@@ -159,7 +168,8 @@
         input.files = transfer.files;
         input.dispatchEvent(new Event('change', {bubbles: true}));
         window.dispatchEvent(new Event('mb-import-source'));
-        window.showToast?.(`MinerU 已识别 ${report.questions} 处题号、${report.figures} 张配图，核对后点击“开始解析”`, 'success');
+        const reused = job.result.cached ? '（复用此前的解析结果，未消耗 MinerU 额度）' : '';
+        window.showToast?.(`MinerU 已识别 ${report.questions} 处题号、${report.figures} 张配图${reused}，核对后点击“开始解析”`, 'success');
     }
 
     // ---------- MinerU key in 系统设置 ----------

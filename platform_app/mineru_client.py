@@ -93,11 +93,16 @@ class MinerUClient:
                 raise MinerUError('等待解析结果超时')
             time.sleep(interval)
 
-    def download(self, zip_url: str, target: Path) -> Path:
-        """Extract the result zip into target, refusing paths that leave it."""
+    def download(self, zip_url: str, target: Path, keep: Path | None = None) -> Path:
+        """Extract the result zip into target, refusing paths that leave it; optionally keep the zip."""
         response = self.storage.get(zip_url)
         if response.status_code != 200:
             raise MinerUError(f'结果下载失败：HTTP {response.status_code}')
+        if keep is not None:
+            keep.parent.mkdir(parents=True, exist_ok=True)
+            partial = keep.with_suffix('.part')
+            partial.write_bytes(response.content)
+            partial.replace(keep)
         target = target.resolve()
         with zipfile.ZipFile(io.BytesIO(response.content)) as archive:
             for member in archive.infolist():

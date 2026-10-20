@@ -8,8 +8,11 @@ request, so teachers review and save questions with the native flow. The
 original paper stays available (/origin) for side-by-side review.
 """
 import asyncio
+from dataclasses import asdict
+import hashlib
 import io
 import json
+import os
 import shutil
 import time
 import uuid
@@ -23,7 +26,7 @@ from fastapi.responses import FileResponse
 from platform_app import store
 from platform_app.assets import rewrite_assets
 from platform_app.auth import actor, space_access
-from platform_app.mineru_client import MinerUClient, MinerUError, Options
+from platform_app.mineru_client import API, MinerUClient, MinerUError, Options
 from platform_app.mineru_markdown import convert
 
 router = APIRouter(prefix='/platform/api/spaces/{space_id}/mineru')
@@ -33,11 +36,21 @@ ORIGIN_TYPES = {'.pdf': 'application/pdf', '.png': 'image/png', '.jpg': 'image/j
 UPLOAD_BATCH = 20          # the bank's /api/upload/batch limit
 MAX_BYTES = 120 * 1024 * 1024
 KEEP_SECONDS = 3 * 86400
+# Result zips of earlier MinerU parses: the same file with the same options is not sent
+# (and paid for) again. Kept 30 days, at most 2 GB, least recently used first out.
+CACHE_SECONDS = 30 * 86400
+CACHE_BYTES = 2 * 1024 ** 3
 jobs = {}
 
 
 def directory():
     return store.DATA / 'mineru'
+
+
+def cached_result(data: bytes, options: Options) -> Path:
+    key = hashlib.sha256(json.dumps({'file': hashlib.sha256(data).hexdigest(), 'options': asdict(options),
+                                     'api': API}, sort_keys=True).encode()).hexdigest()
+    return store.DATA / 'mineru-cache' / f'{key}.zip'
 
 
 def extract(data, target):
@@ -79,8 +92,14 @@ async def run(job, workers, space, source, options, key):
 
     try:
         result = job['_dir'] / 'result'
+        cached = None if source.suffix == '.zip' else cached_result(source.read_bytes(), options)
         if source.suffix == '.zip':
             extract(source.read_bytes(), result)
+        elif cached.exists():
+            update(state='downloading', message='复用此前的 MinerU 解析结果')
+            extract(cached.read_bytes(), result)
+            os.utime(cached)
+            job['cached'] = True
         else:
             client = MinerUClient(key)
             try:
@@ -93,7 +112,7 @@ async def run(job, workers, space, source, options, key):
                     update(state='parsing', message=f'MinerU 正在解析{pages}')
                 item = await asyncio.to_thread(client.wait, batch, on_progress=progress)
                 update(state='downloading', message='正在下载解析结果')
-                await asyncio.to_thread(client.download, item['full_zip_url'], result)
+                await asyncio.to_thread(client.download, item['full_zip_url'], result, cached)
             finally:
                 client.close()
         path, blocks = content_list(result)
@@ -103,8 +122,9 @@ async def run(job, workers, space, source, options, key):
         report['figures'] = len(figures)
         # The original paper for side-by-side review: the upload, or the PDF a result zip carries.
         job['_origin'] = next(result.rglob('*_origin.pdf'), None) if source.suffix == '.zip' else source
-        update(state='done', message='已完成', result={'markdown': markdown, 'report': report, 'origin': bool(job['_origin']),
-                                                     'mapping': rewrite_assets(mapping, space['id'])})
+        update(state='done', message='已完成（复用此前的解析结果，未再调用 MinerU）' if job.get('cached') else '已完成',
+               result={'markdown': markdown, 'report': report, 'origin': bool(job['_origin']),
+                       'cached': bool(job.get('cached')), 'mapping': rewrite_assets(mapping, space['id'])})
     except (MinerUError, OSError, ValueError, zipfile.BadZipFile, httpx.HTTPError, HTTPException) as error:
         update(state='failed', message=getattr(error, 'detail', None) or str(error))
 
@@ -114,6 +134,14 @@ def cleanup():
     for path in root.glob('*') if root.exists() else ():
         if path.is_dir() and path.stat().st_mtime < time.time() - KEEP_SECONDS:
             shutil.rmtree(path, ignore_errors=True)
+    cache = store.DATA / 'mineru-cache'
+    entries = sorted(cache.glob('*.zip'), key=lambda p: p.stat().st_mtime) if cache.exists() else []
+    total = sum(p.stat().st_size for p in entries)
+    for path in entries:
+        if path.stat().st_mtime >= time.time() - CACHE_SECONDS and total <= CACHE_BYTES:
+            continue
+        total -= path.stat().st_size
+        path.unlink(missing_ok=True)
     for job_id in [j for j, job in jobs.items() if job['_started'] < time.monotonic() - KEEP_SECONDS]:
         del jobs[job_id]
 

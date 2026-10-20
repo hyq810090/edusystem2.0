@@ -39,6 +39,7 @@
 - 严禁从 Windows 宿主机用 SQLite（包括只读连接）打开正在由 Linux Docker 使用的 data/*.db 或 data/banks/*/*.db。跨内核 WAL/SHM 生命周期曾导致 SQLITE_CANTOPEN/I/O 错误。运行期核验通过 HTTP API；必要的 SQL、在线备份及完整性检查只在同一容器内执行并显式关闭连接。离线文件备份须先检查活动任务并正常关闭本项目服务，不删除 WAL/SHM。健康验收必须检查每个空间的 questions/categories/stats/papers，不能只看 /healthz 或元数据。
 
 - MinerU 导入只做前置整理：`platform_app/imports.py` 调用 MinerU（或读取结果包），`mineru_markdown.py` 按 content_list 坐标重建 Markdown 并分批上传配图，最终仍走原生 Markdown 导入、AI 拆题、公式核对与审查入库。不得绕过审查直接入库，不改引擎拆题代码。MinerU Key 存为平台设置 `mineru_key`（团队优先），不下发给 worker。图片选项判定规则改动须保持 `tests_platform/test_mineru_import.py` 的行、网格与题干图用例通过，并用真实试卷对照原页复核。
+- MinerU 快速拆题（`platform_app/mineru_fastpath.py`，前端 `bridge.js` 在 MinerU 来源的拆题请求上加 `platform_fast_path=mineru`，平台转到 worker 的 `/internal/fast-parse`）只替换 `ai_parse_paper` 中那一次整卷拆题模型调用：本地切段后，每段必须单独通过引擎 `inspect_source_structure` 才保留原文；模型只返回 is_question、题型、教材分类与难度，结果须完整覆盖全部 id 且取值合法，否则整卷退回原请求。原文核对、原答案保护、配图映射等后处理一律沿用引擎代码，不得在平台另写。不伪造或复用引擎的 Word/PDF 来源证书；不确定的版式（跳号、重号、共用材料、卷末答案、跨题引用）宁可退回整卷拆题。改动须保持 `tests_platform/test_mineru_fastpath.py` 通过，并用真实 MinerU 结果对比新旧两条路径的题数、题文与分类。MinerU 结果缓存键为文件内容、全部解析选项与接口地址，缓存只存结果包，不存 Key。
 
 - 试卷目录最多两级（`spaces.MAX_FOLDER_DEPTH`），同级不重名。旧安装中更深的目录仍须能列出、筛选和删除。按目录筛选包含其子目录（`spaces.folder_subtree`）；删除目录时子目录一并删除，其中试卷移到被删目录的上一级（一级目录的移到未归档），不删除试卷。界面为“试卷管理”左侧目录树（`paper-tools.js`），不再使用目录管理弹窗；拖动移动与目录加载以版本号防止旧加载覆盖新移动。
 - 侧栏收起由 `space-picker.js` 写 `mb_nav` cookie，`app.inject` 据此在 `<html>` 上输出 `data-nav="collapsed"`，样式只在桌面宽度生效；切换后派发 resize，让组卷分页和选项栅格重新测量。

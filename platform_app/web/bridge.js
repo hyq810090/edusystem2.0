@@ -42,6 +42,20 @@
         if (response.status === 401 || response.headers.get('X-MathBank-Session-Changed') === '1') location.assign('/');
         return response;
     }
+    // Which way a MinerU paper was split (platform_app/mineru_fastpath.py).
+    async function announceFastPath(response) {
+        const report = (await response.json().catch(() => ({})))?.tex_diagnostics?.fast_path;
+        if (!report || !window.showToast) return;
+        const seconds = Math.max(1, Math.round((report.timings_ms?.total || 0) / 1000));
+        if (report.status === 'used' || report.status === 'partial') {
+            const parts = [`快速拆题完成：${report.questions} 道题，用时 ${seconds} 秒。题文保留 MinerU 原文，AI 只做分类`];
+            if (report.uncertain?.length) parts.push(`${report.uncertain.length} 段边界不确定，已由 AI 单独拆题`);
+            if (report.skipped?.length) parts.push(`${report.skipped.length} 段说明文字未作为题目`);
+            window.showToast(parts.join('；') + '。', 'success');
+        } else if (report.status === 'fallback') {
+            window.showToast(`已按整卷方式拆题（${report.reason_text}），用时 ${seconds} 秒。`, 'info');
+        }
+    }
     window.fetch = (input, init = {}) => {
         const url = new URL(input instanceof Request ? input.url : String(input), location.href);
         if (url.origin !== location.origin) return nativeFetch(input, init);
@@ -50,16 +64,22 @@
             if (url.pathname === '/api/paper/save' && typeof init.body === 'string') {
                 init = {...init, body: JSON.stringify({...JSON.parse(init.body), platform_folder_id: ctx.folders.save})};
             }
-            // Figures of a MinerU import are uploaded already (mineru.js).
+            // Figures of a MinerU import are uploaded already (mineru.js). Its Markdown is the
+            // source itself: the fast parse keeps that text and asks the model only to classify.
+            let fast = false;
             if (url.pathname === '/api/ai/parse-paper' && ctx.mineru && init.body instanceof FormData) {
                 const own = JSON.parse(init.body.get('image_mapping_json') || '{}');
                 init.body.set('image_mapping_json', JSON.stringify({...ctx.mineru.mapping, ...own}));
+                fast = ctx.mineru.fast !== false && init.body.get('source_format') === 'markdown';
+                if (fast) init.body.set('platform_fast_path', 'mineru');
             }
             if (/\/settings(\/save)?$/.test(url.pathname) && document.getElementById('platformDefaultModel')?.checked) {
                 url.searchParams.set('platform_default', '1');
             }
             url.pathname = `/bank/${space.id}${url.pathname}`;
-            return send(input, init, url);
+            const sent = send(input, init, url);
+            if (fast) sent.then(response => announceFastPath(response.clone())).catch(() => {});
+            return sent;
         }
         if (url.pathname.startsWith('/platform/api/') || url.pathname.startsWith('/bank/')) return send(input, init);
         return nativeFetch(input, init);

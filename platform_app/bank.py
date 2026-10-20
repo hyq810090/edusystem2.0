@@ -95,13 +95,18 @@ async def bank(space_id: int, path: str, request: Request):
     if body and 'multipart/form-data' in content_type:
         # Rebuild the form so only text fields get asset prefixes rewritten;
         # uploaded file bytes pass through untouched.
-        parts = []
+        parts, target = [], '/api/' + path
         for key, value in (await request.form()).multi_items():
-            if hasattr(value, 'read'):
+            if key == 'platform_fast_path':
+                # A MinerU source: the worker keeps its text and asks the model only to classify
+                # (mineru_fastpath), falling back to the native parse by itself.
+                if path == 'ai/parse-paper' and value == 'mineru':
+                    target = '/internal/fast-parse'
+            elif hasattr(value, 'read'):
                 parts.append((key, (value.filename, await value.read(), value.content_type)))
             else:
                 parts.append((key, (None, rewrite_assets(value, space_id, False))))
-        result = await workers.call(worker, request.method, '/api/' + path, params=request.query_params, files=parts)
+        result = await workers.call(worker, request.method, target, params=request.query_params, files=parts)
     else:
         if body and 'application/json' in content_type:
             body = json.dumps(rewrite_assets(json.loads(body), space_id, False), ensure_ascii=False).encode()

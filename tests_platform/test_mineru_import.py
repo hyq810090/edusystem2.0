@@ -182,3 +182,39 @@ def test_pdf_import_runs_mineru_with_forced_ocr(system, monkeypatch):  # noqa: F
     assert job['state'] == 'done', job
     assert seen['submitted']['files'][0] == {'name': 'source.pdf', 'is_ocr': True, 'page_ranges': '1-2'}
     assert '1．如图' in job['result']['markdown'] and 'D．![](images/g3.jpg)' in job['result']['markdown']
+
+
+def test_the_same_file_and_options_reuse_the_earlier_result(system, monkeypatch):  # noqa: F811
+    space = new_space(system, 'MinerU 缓存')['id']
+    blocks = [text('1. 已知集合 A，求并集（ ）', [90, 50, 900, 70])]
+    submitted = []
+
+    def handler(request):
+        if request.url.path.endswith('/file-urls/batch'):
+            submitted.append(json.loads(request.content))
+            return httpx.Response(200, json={'code': 0, 'data': {'batch_id': 'b', 'file_urls': ['https://oss.example/u']}})
+        if request.url.host == 'oss.example':
+            return httpx.Response(200)
+        if request.url.path.endswith('/extract-results/batch/b'):
+            return httpx.Response(200, json={'code': 0, 'data': {'extract_result': [
+                {'state': 'done', 'full_zip_url': 'https://cdn.example/r.zip'}]}})
+        return httpx.Response(200, content=result_zip(blocks, []))
+    transport = httpx.MockTransport(handler)
+    monkeypatch.setattr(imports, 'MinerUClient', lambda key: MinerUClient(key, transport=transport))
+    system.post('/platform/api/ai-settings', json={'scope': 'team', 'config': {'mineru_key': 'team-mineru'}})
+
+    def run(content, ranges=''):
+        response = system.post(f'/platform/api/spaces/{space}/mineru', data={'page_ranges': ranges},
+                               files={'file': ('缓存.pdf', content, 'application/pdf')})
+        return wait(system, f"/platform/api/spaces/{space}/mineru/{response.json()['id']}")
+
+    cached = lambda: len(list((store.DATA / 'mineru-cache').glob('*.zip')))
+    before = cached()
+    first, again = run(b'%PDF-1.4 cache'), run(b'%PDF-1.4 cache')
+    assert first['state'] == again['state'] == 'done' and len(submitted) == 1
+    assert not first['result']['cached'] and again['result']['cached'] and '复用' in again['message']
+    assert again['result']['markdown'] == first['result']['markdown']
+    # Different pages or a different file are parsed again.
+    assert not run(b'%PDF-1.4 cache', '1-2')['result']['cached'] and len(submitted) == 2
+    assert not run(b'%PDF-1.4 other')['result']['cached'] and len(submitted) == 3
+    assert cached() - before == 3
