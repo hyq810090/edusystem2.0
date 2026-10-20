@@ -44,13 +44,17 @@
     }
     // Which way a MinerU paper was split (platform_app/mineru_fastpath.py).
     async function announceFastPath(response) {
-        const report = (await response.json().catch(() => ({})))?.tex_diagnostics?.fast_path;
+        const body = await response.json().catch(() => ({}));
+        const report = body?.tex_diagnostics?.fast_path;
         if (!report || !window.showToast) return;
+        const pending = (Array.isArray(body.questions) ? body.questions : [])
+            .filter(q => q?.classification_review?.required === true).length;
         const seconds = Math.max(1, Math.round((report.timings_ms?.total || 0) / 1000));
         if (report.status === 'used' || report.status === 'partial') {
             const parts = [`快速拆题完成：${report.questions} 道题，用时 ${seconds} 秒。题文保留 MinerU 原文，AI 只做分类`];
             if (report.uncertain?.length) parts.push(`${report.uncertain.length} 段边界不确定，已由 AI 单独拆题`);
             if (report.skipped?.length) parts.push(`${report.skipped.length} 段说明文字未作为题目`);
+            if (pending) parts.push(`${pending} 道题的分类对不上教材目录，请在卡片上选择章节`);
             window.showToast(parts.join('；') + '。', 'success');
         } else if (report.status === 'fallback') {
             window.showToast(`已按整卷方式拆题（${report.reason_text}），用时 ${seconds} 秒。`, 'info');

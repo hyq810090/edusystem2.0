@@ -24,6 +24,7 @@ from mathbank.content_locks import (
     _is_choice_answer_blank, _next_math_span, _literal_math_scan_source,
 )
 from mathbank.curriculums import DEFAULT_DIFFICULTIES, DEFAULT_QUESTION_TYPES
+from mathbank.import_classification import normalize_import_classifications
 from mathbank.math_markdown import normalize_question_math_markdown
 from mathbank.paper_helper import clean_choice_stem_parentheses
 from mathbank.prompts import CLASSIFICATION_PRIORITY_RULE, build_curriculum_text
@@ -999,17 +1000,31 @@ def apply_source_metadata_response(parsed: dict, plan: dict, curriculum: dict, *
             # Backward compatibility for providers using the previous schema:
             # missing refinement means whole-chapter, never a copied chapter label.
             row = {**row, "category_knowledge": ""}
-        if not isinstance(row, dict) or set(row) != fields or any(not isinstance(v, str) for v in row.values()):
+        required_fields = {"id", "question_type", "difficulty"}
+        if (not isinstance(row, dict) or not required_fields.issubset(row)
+                or set(row) - fields
+                or any(not isinstance(row[key], str) for key in required_fields)):
             raise SourceMetadataContractError("元数据字段无效，不接收模型改写原文。")
+        row = dict(row)
         identifier = row["id"]
         if identifier not in known or identifier in supplied:
             raise SourceMetadataContractError("元数据来源标识未知或重复。")
-        if (row["question_type"] not in types or row["difficulty"] not in difficulties
-                or not word_category_allowed(scope, row["category_compulsory"], row["category_chapter"])):
-            raise SourceMetadataContractError("元数据题型、难度或教材分类不在当前支持范围。")
-        allowed_knowledge = curriculum.get(row["category_compulsory"], {}).get(row["category_chapter"], ())
-        if row["category_knowledge"] and row["category_knowledge"] not in allowed_knowledge:
-            raise SourceMetadataContractError("元数据小节不属于所选版本、学段和章节。")
+        if row["question_type"] not in types or row["difficulty"] not in difficulties:
+            raise SourceMetadataContractError("元数据题型或难度不在当前支持范围。")
+        if scope.allow_outside:
+            # Preserve the existing, privately certified Word source-grade
+            # suggestion contract. It never creates a current-catalog path.
+            if not word_category_allowed(scope, row.get("category_compulsory"), row.get("category_chapter")):
+                raise SourceMetadataContractError("元数据教材建议不符合已核验原卷的学段范围。")
+            if (not isinstance(row.get("category_knowledge", ""), str)
+                    or row.get("category_knowledge", "")):
+                raise SourceMetadataContractError("目录外学段建议不能指定当前教材小节。")
+            row["category_knowledge"] = ""
+        else:
+            # Source IDs/body/type contracts remain strict; uncertain optional
+            # labels must not cause a paid full-source rewrite or discard text
+            # (ported from MathBank 3.0.0).
+            normalize_import_classifications([row], curriculum)
         if known[identifier]["has_choices"] and row["question_type"] not in {"single_choice", "multi_choice"}:
             raise SourceMetadataContractError("元数据题型与原卷选择题结构不一致。")
         explicit_type = known[identifier].get("explicit_question_type")
@@ -1026,8 +1041,10 @@ def apply_source_metadata_response(parsed: dict, plan: dict, curriculum: dict, *
             content = normalize_question_math_markdown(content)
         answer = original["answer_markdown"]
         questions.append({"content": content, "answer_markdown": (_ORIGINAL_MARKER + answer) if answer else "",
-            **{key: metadata[key] for key in fields - {"id"}}, "source": "",
-            "referenced_images": embedded_question_assets(content, answer)})
+            **{key: metadata[key] for key in fields - {"id"} if key in metadata}, "source": "",
+            "referenced_images": embedded_question_assets(content, answer),
+            **({"classification_review": metadata["classification_review"]}
+               if "classification_review" in metadata else {})})
     return questions
 
 

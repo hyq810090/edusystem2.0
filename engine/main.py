@@ -87,6 +87,7 @@ from mathbank.docx_helper import extract_docx_markdown
 from mathbank.content_locks import lock_visible_math, reconcile_visible_math
 from mathbank.source_metadata import prepare_word_source_metadata, source_metadata_diagnostics, normalize_source_fillin
 from mathbank.source_metadata_request import request_word_source_metadata
+from mathbank.import_classification import normalize_import_classifications
 from mathbank.paper_parse import (
     PAPER_SPLIT_TIMEOUT_SECONDS, PAPER_SPLIT_CACHE_MAX_CHARACTERS,
     parse_paper_completion, finalize_source_answers, request_pdf_paper_completion,
@@ -4401,11 +4402,11 @@ def parse_paper_text_internal(
             diagnostics=diagnostics,
         )
     if preserve_source_answers:
-        validate_import_knowledge(parsed_questions, get_current_curriculum())
+        validate_import_knowledge(parsed_questions, get_current_curriculum(), diagnostics=diagnostics)
         # Compare the original response before answer filtering or formula edits.
         return parsed_questions
 
-    validate_import_knowledge(parsed_questions, get_current_curriculum())
+    validate_import_knowledge(parsed_questions, get_current_curriculum(), diagnostics=diagnostics)
 
     # 强制进行静默净化：若未勾选自动生成答案，则对于没有带有 [EXTRACTED_ORIGINAL] 的解析和解答，将其强行抹平为空。
     for q in parsed_questions:
@@ -4428,23 +4429,14 @@ def parse_paper_text_internal(
     return parsed_questions
 
 
-def validate_import_knowledge(questions: list[dict], curriculum: dict) -> None:
-    """Reject fabricated import subsections; empty knowledge means whole chapter."""
-    for index, question in enumerate(questions, start=1):
-        compulsory = question.get("category_compulsory", "")
-        chapter = question.get("category_chapter", "")
-        # Older parse providers may omit this optional field. Normalize omission
-        # to explicit whole-chapter status; never synthesize the chapter as a leaf.
-        knowledge = question.get("category_knowledge", "")
-        question["category_knowledge"] = knowledge
-        if not isinstance(knowledge, str):
-            raise ValueError(f"第 {index} 题的小节字段无效，请重新导入并核对。")
-        if compulsory or chapter:
-            if compulsory not in curriculum or chapter not in curriculum[compulsory]:
-                raise ValueError(f"第 {index} 题的学段或章节不在当前教材版本中，请重新导入并核对。")
-        if knowledge and (compulsory not in curriculum or chapter not in curriculum[compulsory]
-                          or knowledge not in curriculum[compulsory][chapter]):
-            raise ValueError(f"第 {index} 题的小节不属于所选版本、学段和章节，请重新导入并核对。")
+def validate_import_knowledge(questions: list[dict], curriculum: dict, *, diagnostics=None) -> None:
+    """Preserve imported source bodies while flagging uncertain placement.
+
+    Unambiguous name formats are matched to the current catalog; anything else
+    becomes that question's ``classification_review`` for the teacher, never an
+    error that discards the whole import (ported from MathBank 3.0.0).
+    """
+    normalize_import_classifications(questions, curriculum, diagnostics)
 
 
 @app.post("/api/ai/parse-paper")
@@ -4531,7 +4523,7 @@ def ai_parse_paper(
         parsed_questions = parse_paper_completion(
             response.json(), diagnostics=tex_diagnostics,
         )
-        validate_import_knowledge(parsed_questions, get_current_curriculum())
+        validate_import_knowledge(parsed_questions, get_current_curriculum(), diagnostics=tex_diagnostics)
         lock_report = reconcile_visible_math(
             parsed_questions, math_locks, tex_result["model_source"],
             tex_comments=source_format != "markdown",

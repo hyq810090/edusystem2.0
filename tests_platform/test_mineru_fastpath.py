@@ -80,18 +80,22 @@ def test_classification_must_cover_every_segment_with_known_values():
     fast.judge_items(items)
     for index, item in enumerate(items):
         item['id'] = f'Q{index + 1}'
-    curriculum = {'必修一': {'第一章': ['第一节']}}
-    assert set(fast.apply_classification(classification(items), items, curriculum)) == {'Q1', 'Q2', 'Q3'}
+    assert set(fast.apply_classification(classification(items), items)) == {'Q1', 'Q2', 'Q3'}
+    # Textbook labels are not judged here: the engine's import check aligns or flags them per question.
+    for labels in (classification(items, category_compulsory='必修一', category_chapter='第九章'),
+                   classification(items, category_chapter='第一章', category_knowledge='第九节'),
+                   {'items': [{key: value for key, value in row.items() if not key.startswith('category_')}
+                              for row in classification(items)['items']]}):
+        assert set(fast.apply_classification(labels, items)) == {'Q1', 'Q2', 'Q3'}
     for bad in (classification(items, id='Q9'), classification(items, question_type='essay'),
-                classification(items, category_compulsory='必修一', category_chapter='第九章'),
-                classification(items, category_compulsory='必修一', category_chapter='第一章', category_knowledge='第九节'),
+                classification(items, difficulty=['3']), classification(items, extra='x'),
                 {'items': classification(items)['items'][:2]}, {'items': [], 'extra': 1}):
         with pytest.raises(fast.Fallback):
-            fast.apply_classification(bad, items, curriculum)
+            fast.apply_classification(bad, items)
     with pytest.raises(fast.Fallback):  # a question with choices cannot be classified as a solution question
         rows = classification(items)
         rows['items'][1]['question_type'] = 'detailed_answer'
-        fast.apply_classification(rows, items, curriculum)
+        fast.apply_classification(rows, items)
 
 
 # ---------- Through the platform and a real worker ----------
@@ -205,6 +209,70 @@ def test_uncertain_layouts_and_bad_classifications_use_the_whole_paper_parse(sys
     model.requests.clear()
     result = parse(system, space, PRACTICE, flag=False)
     assert 'fast_path' not in result['tex_diagnostics'] and len(model.requests) == 1
+
+
+def catalog_names(system, space):  # noqa: F811
+    """One textbook section, a chapter in it and one of its subsections, from the space's own catalog."""
+    tree = system.get(f'/bank/{space}/api/categories').json()
+    book, chapters = next((book, chapters) for book, chapters in tree.items()
+                          if any(sections for sections in chapters.values()))
+    chapter = next(chapter for chapter, sections in chapters.items() if sections)
+    return book, chapter, chapters[chapter][0]
+
+
+def test_unmatched_textbook_labels_are_flagged_per_question_not_sent_back_to_the_whole_paper_parse(system, model):  # noqa: F811
+    space = new_space(system, '快速拆题·分类核对')['id']
+    book, chapter, section = catalog_names(system, space)
+    spaced = chapter.replace(' ', '') if ' ' in chapter else chapter[:1] + ' ' + chapter[1:]
+    labels = [(book, spaced, ''), (book, '第九十九章 不存在的章', ''), (book, chapter, section)]
+
+    def classify(body):
+        reply = FakeModel.answer_classification(body)
+        for row, (compulsory, name, knowledge) in zip(reply['items'], labels):
+            row.update(category_compulsory=compulsory, category_chapter=name, category_knowledge=knowledge)
+        return reply
+
+    model.requests.clear()
+    model.classify = classify
+    try:
+        result = parse(system, space, PRACTICE)
+    finally:
+        model.classify = model.answer_classification
+    report = result['tex_diagnostics']['fast_path']
+    assert report['status'] == 'used' and report['calls'] == 1 and len(model.requests) == 1, report
+    aligned, unknown, exact = result['questions']
+    assert (aligned['category_compulsory'], aligned['category_chapter']) == (book, chapter)
+    assert aligned['classification_review']['required'] is False
+    assert (unknown['category_compulsory'], unknown['category_chapter']) == (book, '')
+    assert unknown['classification_review']['required'] is True
+    assert unknown['classification_review']['original']['category_chapter'] == '第九十九章 不存在的章'
+    assert '$x+1=3$' in aligned['content'] and '\\sqrt{4}' in exact['content']
+    assert (exact['category_chapter'], exact['category_knowledge']) == (chapter, section)
+    assert 'classification_review' not in exact
+    assert result['tex_diagnostics']['import_classification']['review_required'] == 1
+
+
+def test_the_whole_paper_parse_keeps_every_question_when_a_label_is_unknown(system, model):  # noqa: F811
+    space = new_space(system, '整卷拆题·分类核对')['id']
+    book, chapter, _ = catalog_names(system, space)
+    original = model.answer_parse
+
+    def answer_parse(body):
+        reply = original(body)
+        reply['questions'].append({**reply['questions'][0], 'content': '另一题：求 $y$。'})
+        reply['questions'][0].update(category_compulsory=book, category_chapter=chapter,
+                                     category_knowledge='不存在的小节')
+        return reply
+
+    model.answer_parse = answer_parse
+    try:
+        result = parse(system, space, PRACTICE, flag=False)
+    finally:
+        model.answer_parse = original
+    first, second = result['questions']
+    assert (first['category_chapter'], first['category_knowledge']) == (chapter, '')
+    assert first['classification_review']['required'] is True
+    assert second['classification_review']['required'] is True  # no textbook section at all: the teacher picks one
 
 
 def test_a_figure_after_the_options_stays_outside_them():

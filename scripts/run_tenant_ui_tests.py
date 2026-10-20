@@ -33,7 +33,7 @@ async def run():
                     await asyncio.sleep(.05)
                 # The empty-account test runs before public spaces are created.
                 # Arguments run only the named scripts (e.g. workspace_ui_smoke.py).
-                scripts = sys.argv[1:] or ['onboarding_ui_smoke.py','account_ui_smoke.py','multitenant_ui_smoke.py','workspace_ui_smoke.py','handout_ui_smoke.py']
+                scripts = sys.argv[1:] or ['onboarding_ui_smoke.py','account_ui_smoke.py','multitenant_ui_smoke.py','workspace_ui_smoke.py','handout_ui_smoke.py','classification_review_ui_smoke.py']
                 for script in scripts:
                     process = await asyncio.create_subprocess_exec(sys.executable,str(ROOT/'tests_platform'/script),cwd=ROOT)
                     result = await process.wait()

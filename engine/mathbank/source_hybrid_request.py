@@ -8,6 +8,7 @@ import json
 
 from mathbank.ai_providers import apply_model_thinking_policy
 from mathbank.content_locks import lock_visible_math, reconcile_visible_math
+from mathbank.import_classification import normalize_import_classifications
 from mathbank.paper_parse import PAPER_SPLIT_TIMEOUT_SECONDS, parse_paper_completion
 from mathbank.pdf_vision_request import completion_content
 from mathbank.prompts import build_pdf_parse_system_prompt
@@ -143,6 +144,7 @@ def _adopt_parts(parsed: dict, groups: list[dict], locks: dict, curriculum: dict
                 ordered = [deepcopy(indexed[qid]) for qid in group["question_ids"]]
                 questions = parse_paper_completion({"choices":[{"finish_reason":"stop",
                     "message":{"content":json.dumps({"questions":ordered}, ensure_ascii=False)}}]})
+                normalize_import_classifications(questions, curriculum)
                 owned_source = "".join(original_source[slice(*bounds)] for bounds in group["owned_ranges"])
                 allowed_images = set(embedded_question_assets(owned_source))
                 for question in questions:

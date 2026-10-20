@@ -53,15 +53,18 @@ def test_complete_json_or_complete_fence_keeps_body_local_and_uses_one_post(monk
     assert diagnostics["word_source_metadata"]["status"] == "used"
 
 
-def test_word_metadata_rejects_non_leaf_or_cross_chapter_knowledge(monkeypatch):
+def test_word_metadata_flags_non_leaf_or_cross_chapter_knowledge_without_a_fallback(monkeypatch):
+    """MathBank 3.0.0: the label becomes that question's review; the local body is kept, no second POST."""
     for knowledge in ("函数", "空间向量", "不存在的小节"):
-        request, calls, diagnostics, _ = run(
+        request, calls, diagnostics, plan = run(
             monkeypatch,
             lambda row, value=knowledge: json.dumps({"items": [{**row, "category_knowledge": value}]}, ensure_ascii=False),
         )
-        with pytest.raises((ValueError, TypeError)):
-            request()
-        assert len(calls) == 1 and diagnostics["word_source_metadata"]["status"] == "fallback"
+        questions = request()
+        assert questions[0]["content"] == plan["questions"][0]["content"]
+        assert (questions[0]["category_chapter"], questions[0]["category_knowledge"]) == ("函数", "")
+        assert questions[0]["classification_review"]["required"] is True
+        assert len(calls) == 1 and diagnostics["word_source_metadata"]["status"] == "used"
 
 
 @pytest.mark.parametrize("transform", [

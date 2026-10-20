@@ -847,6 +847,13 @@ html.init-ws-paper #appNavPaper {
     color: #94A3B8 !important; /* Desaturate indigo text color */
 }
 
+/* Import cards: a classification that still needs the teacher's choice */
+.dark .card-classification-review[data-classification-required="true"] {
+    background-color: rgba(245, 158, 11, 0.12) !important;
+    color: #FDE68A !important;
+    border-color: rgba(245, 158, 11, 0.4) !important;
+}
+
 .dark .bg-slate-50\/50,
 .dark .bg-slate-50 {
     background-color: rgba(15, 23, 42, 0.5) !important;

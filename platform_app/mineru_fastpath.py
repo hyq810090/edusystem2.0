@@ -173,34 +173,33 @@ def classification_messages(items: list[dict], curriculum: dict) -> list[dict]:
             {'role': 'user', 'content': json.dumps({'items': rows}, ensure_ascii=False, separators=(',', ':'))}]
 
 
-def apply_classification(parsed, items: list[dict], curriculum: dict) -> dict:
+CATEGORY_FIELDS = ('category_compulsory', 'category_chapter', 'category_knowledge')
+
+
+def apply_classification(parsed, items: list[dict]) -> dict:
+    """Strict on ids, coverage, question type and difficulty. Textbook labels pass through as returned:
+    the engine's import check (ported from MathBank 3.0.0) matches name formats to the catalog or flags
+    that one question for a manual choice, so a label never sends the paper back to a whole-paper parse."""
     from mathbank.curriculums import DEFAULT_DIFFICULTIES, DEFAULT_QUESTION_TYPES
     known = {item['id']: item for item in items if item['source']}
     if not isinstance(parsed, dict) or set(parsed) != {'items'} or not isinstance(parsed['items'], list):
         raise Fallback('classification_failed')
     types = set(allowed_values('question_types', DEFAULT_QUESTION_TYPES))
     difficulties = set(allowed_values('difficulties', DEFAULT_DIFFICULTIES))
-    fields = {'id', 'is_question', 'question_type', 'category_compulsory', 'category_chapter',
-              'category_knowledge', 'difficulty'}
+    fields = {'id', 'is_question', 'question_type', 'difficulty', *CATEGORY_FIELDS}
     rows = {}
     for row in parsed['items']:
-        if not isinstance(row, dict) or set(row) != fields or not isinstance(row['is_question'], bool):
+        if (not isinstance(row, dict) or not {'id', 'is_question'} <= set(row) or set(row) - fields
+                or not isinstance(row['is_question'], bool) or not isinstance(row['id'], str)):
             raise Fallback('classification_failed')
         if row['id'] not in known or row['id'] in rows:
             raise Fallback('classification_failed')
         if row['is_question']:
-            text = {key: row[key] for key in fields - {'id', 'is_question'}}
-            if any(not isinstance(value, str) for value in text.values()):
+            question_type, difficulty = row.get('question_type'), row.get('difficulty')
+            if (not isinstance(question_type, str) or not isinstance(difficulty, str)
+                    or question_type not in types or difficulty not in difficulties):
                 raise Fallback('classification_failed')
-            if text['question_type'] not in types or text['difficulty'] not in difficulties:
-                raise Fallback('classification_failed')
-            if known[row['id']]['source']['has_choices'] and text['question_type'] not in CHOICE_TYPES & types:
-                raise Fallback('classification_failed')
-            compulsory, chapter, knowledge = (text['category_compulsory'], text['category_chapter'],
-                                              text['category_knowledge'])
-            if (compulsory or chapter) and chapter not in curriculum.get(compulsory, {}):
-                raise Fallback('classification_failed')
-            if knowledge and knowledge not in curriculum.get(compulsory, {}).get(chapter, ()):
+            if known[row['id']]['source']['has_choices'] and question_type not in CHOICE_TYPES & types:
                 raise Fallback('classification_failed')
         rows[row['id']] = row
     if set(rows) != set(known):
@@ -266,7 +265,7 @@ class FastParse:
             self.report['timings_ms'][f'classification_{index + 1}'] = round((time.monotonic() - began) * 1000)
             self.report['usage'].append({'stage': f'classification_{index + 1}', **_usage(body)})
             raw = completion_content(body, 'MinerU 快速拆题分类', max_chars=500_000)
-            return apply_classification(parse_review_response(raw), batch, curriculum)
+            return apply_classification(parse_review_response(raw), batch)
 
         def split_uncertain(item):
             payload = deepcopy(data)
@@ -328,8 +327,7 @@ def build_questions(items, rows, split, normalize_fillin, report) -> list[dict]:
         answer = source['answer_markdown']
         questions.append({
             'content': content, 'answer_markdown': ('[EXTRACTED_ORIGINAL]' + answer) if answer else '',
-            **{key: row[key] for key in ('question_type', 'category_compulsory', 'category_chapter',
-                                         'category_knowledge', 'difficulty')},
+            **{key: row[key] for key in ('question_type', 'difficulty', *CATEGORY_FIELDS) if key in row},
             'source': '', 'referenced_images': embedded_question_assets(content, answer)})
     return questions
 

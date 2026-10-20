@@ -2108,6 +2108,16 @@
         }
 
         function appendSourceIntegrityLog(report) {
+            const classificationPending = parsedQuestionsData.filter(q => q?.classification_review?.required === true).length;
+            const classificationAligned = parsedQuestionsData.filter(q => q?.classification_review
+                && q.classification_review.required !== true
+                && Array.isArray(q.classification_review.normalized_fields)
+                && q.classification_review.normalized_fields.length).length;
+            if (classificationPending) {
+                appendImportLog(`分类核对：${classificationPending} 道题的分类对不上当前教材目录，已取消勾选，请在题目卡片上选择学段和章节。`, 'warning');
+            } else if (classificationAligned) {
+                appendImportLog(`分类核对：${classificationAligned} 道题的分类名称写法不同，已按当前目录对齐。`, 'info');
+            }
             const splittingSummary = paperSplittingReportSummary(report?.pdf_splitting);
             if (splittingSummary) appendImportLog(splittingSummary, 'info');
             const verificationSummary = pdfSourceVerificationReportSummary(sourceVerificationForReport(report));
@@ -4662,7 +4672,7 @@
                     <!-- Card Top Configs Bar -->
                     <div class="grid grid-cols-2 sm:grid-cols-5 gap-2 border-b pb-3 shrink-0">
                         <div class="flex items-center space-x-2 select-none text-slate-700 text-xs font-bold">
-                            <input type="checkbox" data-index="${index}" class="card-select-checkbox h-4 w-4 rounded border-slate-300 text-brand-600 focus:ring-brand-500 cursor-pointer transition-colors" ${q.saved ? 'disabled' : 'checked'} onclick="event.stopPropagation()">
+                            <input type="checkbox" data-index="${index}" class="card-select-checkbox h-4 w-4 rounded border-slate-300 text-brand-600 focus:ring-brand-500 cursor-pointer transition-colors" ${q.saved ? 'disabled' : (q.classification_review?.required === true ? '' : 'checked')} onclick="event.stopPropagation()">
                             <span class="h-5 w-5 bg-brand-50 text-brand-600 rounded-full flex items-center justify-center text-[10px] font-bold border border-brand-100">${index + 1}</span>
                             <span>题型与难度</span>
                         </div>
@@ -4750,6 +4760,7 @@
                 container.appendChild(card);
                 renderParsedSourceReview(card, q, index);
                 setupCardCategoryLinkage(card, q);
+                renderParsedClassificationReview(card, q);
 
                 // Populate image badges
                 const badgesContainer = document.getElementById(`card-images-badges-${index}`);
@@ -4793,6 +4804,73 @@
             });
 
             if (typeof updateSelectedCount === 'function') updateSelectedCount();
+        }
+
+        // Import classification check (ported from MathBank 3.0.0): a name format that
+        // matched one catalog entry was aligned; anything else is this question's own
+        // review. The card starts unselected and is released once the teacher picks a
+        // textbook section and chapter, or keeps a matched chapter as a whole.
+        function renderParsedClassificationReview(card, q) {
+            const review = q?.classification_review;
+            if (!review || typeof review !== 'object' || q.saved) return;
+            const linkage = card.querySelector('.card-compulsory')?.parentElement;
+            if (!linkage) return;
+            const selects = ['.card-compulsory', '.card-chapter', '.card-knowledge'].map(selector => card.querySelector(selector));
+            const panel = document.createElement('div');
+            const status = document.createElement('p');
+            status.className = 'card-classification-status font-semibold';
+            const message = document.createElement('p');
+            message.className = 'card-classification-message mt-1 whitespace-pre-wrap break-words';
+            const details = document.createElement('details');
+            details.className = 'mt-1';
+            const summary = document.createElement('summary');
+            summary.className = 'cursor-pointer';
+            summary.textContent = '查看模型给出的原分类';
+            const original = document.createElement('p');
+            original.className = 'card-classification-original mt-1 whitespace-pre-wrap break-words';
+            const labels = {category_compulsory: '学段', category_chapter: '章节', category_knowledge: '小节'};
+            const lines = Object.entries(labels).map(([field, label]) =>
+                `${label}：${String(review.original?.[field] || '（未提供）')}`);
+            Object.entries(review.candidates && typeof review.candidates === 'object' ? review.candidates : {})
+                .forEach(([field, names]) => {
+                    if (Array.isArray(names) && names.length) lines.push(`${labels[field] || field}可选：${names.join('、')}`);
+                });
+            original.textContent = lines.join('\n');
+            details.append(summary, original);
+            const keep = document.createElement('button');
+            keep.type = 'button';
+            keep.className = 'card-classification-confirm glass-btn mt-2 px-3 py-1.5 rounded-lg font-semibold';
+            keep.textContent = '按整章保留';
+            panel.append(status, message, details, keep);
+            linkage.insertAdjacentElement('afterend', panel);
+            const chosen = () => Boolean(selects[0]?.value && selects[1]?.value);
+            const update = () => {
+                const required = review.required === true;
+                panel.dataset.classificationRequired = String(required);
+                panel.className = 'card-classification-review rounded-lg px-3 py-2 text-[10px] shrink-0 ' +
+                    (required ? 'border border-amber-200 bg-amber-50 text-amber-800' : 'text-slate-500');
+                status.textContent = required ? '分类待人工选择'
+                    : (review.confirmed_by === 'user' ? '分类已人工选择' : '分类名称已按当前目录对齐');
+                message.hidden = !required;
+                message.textContent = String(review.message || '') || '原分类对不上当前教材目录，请选择学段和章节。';
+                keep.hidden = !required || !chosen();
+            };
+            const confirm = () => {
+                if (!chosen()) { update(); return; }
+                review.required = false;
+                review.confirmed_by = 'user';
+                const checkbox = card.querySelector('.card-select-checkbox');
+                if (checkbox && !q.saved) checkbox.checked = true;
+                update();
+                if (typeof updateSelectedCount === 'function') updateSelectedCount();
+            };
+            // Registered after setupCardCategoryLinkage, so dependent options are already rebuilt.
+            selects.forEach(select => select?.addEventListener('change', () => {
+                if (review.required === true && chosen() && select !== selects[0]) confirm();
+                else update();
+            }));
+            keep.addEventListener('click', confirm);
+            update();
         }
 
         function setupCardCategoryLinkage(card, q) {
