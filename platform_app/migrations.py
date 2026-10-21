@@ -101,6 +101,7 @@ STEPS = [
     ('difficulty-1-5-v1', lambda: difficulty_migration.migrate(store)),
     ('junior-math-grade9-v1', lambda: junior_math_grade9.migrate(store)),
     ('handouts-v1', lambda: add_table('handouts')),
+    ('drawings-v1', lambda: add_table('drawings')),
 ]
 NAMES = [name for name, _ in STEPS]
 

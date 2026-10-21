@@ -51,3 +51,10 @@
 - 讲义导出在空间 worker 的 `/internal/handout` 内复用引擎函数（题目 LaTeX、配图收集、编译、Word 构建器），不得另写一套题目排版。Word 中题干右侧配图用无边框两栏表格，不用浮动图片。改版式须导出 PDF 与 Word 的学生版、教师版核对，docx 须用 Microsoft Word 打开（LibreOffice 对 OOXML 校验和浮动对象都比 Word 宽松，不能代替）。
 - 试卷 Word 的“题干右侧”配图由引擎 `_add_right_figure_row` 输出无边框两栏行（题干左、图右，选项通栏在下），讲义只覆盖其配图尺寸；不得改回 `wp:anchor` 浮动图（Microsoft Word 会把选项推到图下、下一题的图压住上一题选项，且曾因 `wrapText="both"` 拒绝打开整份文件）。题干末尾空括号连同其后的句号由引擎 `clean_choice_stem_parentheses`／`cleanChoiceStemParentheses` 统一去掉，平台不再另写规则。回归见 `tests_platform/test_paper_export_layout.py`，规则详见 `engine/AGENTS.md`。
 - 讲义界面改动须执行 `tests_platform/handout_ui_smoke.py`（`run_tenant_ui_tests.py` 默认包含），讲义接口与导出由 `tests_platform/test_handouts.py` 覆盖。
+- 绘图（`drawings.py`、`ggb_ai.py`、`web/drawings.js`，表 `drawings`）用自托管 GeoGebra Classic：
+  - 程序包在 `platform_app/vendor/geogebra/<版本>/`，不进 Git，由 `scripts/fetch_geogebra.py` 固定版本与 SHA-256 获取。版本路径按一年缓存，升级须换新版本目录，并同步 `drawings.GEOGEBRA_VERSION`、`drawings.js` 与获取脚本。
+  - 存入的 .ggb 一律经 `clean_ggb` 去掉 JavaScript（全局脚本重置、对象 `<javascript>` 删除），PNG 经 `clean_png` 校验并裁边。
+  - AI 只返回 GeoGebra 指令（`ggb_ai.py` 过滤脚本类指令），由浏览器里的 GeoGebra 执行，服务器不执行。
+  - 题目引用一律经引擎原有上传接口复制图片，不直接引用绘图。
+  - 改动须保持 `tests_platform/test_drawings.py` 与 `drawing_ui_smoke.py` 通过，后者断网验证不访问任何外部地址。
+  - GeoGebra 免费许可仅限非商业用途。

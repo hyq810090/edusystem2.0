@@ -59,6 +59,11 @@ SCHEMA = {
       folder_id INTEGER REFERENCES folders(id), title TEXT NOT NULL, document TEXT NOT NULL,
       revision INTEGER NOT NULL DEFAULT 1, created_by INTEGER REFERENCES users(id),
       updated_by INTEGER REFERENCES users(id), created REAL NOT NULL, updated REAL NOT NULL)''',
+    # 绘图: GeoGebra constructions (.ggb as base64) with a trimmed PNG (see platform_app/drawings.py).
+    'drawings': '''CREATE TABLE drawings(id INTEGER PRIMARY KEY, space_id INTEGER NOT NULL REFERENCES spaces(id),
+      title TEXT NOT NULL, ggb TEXT NOT NULL DEFAULT '', png BLOB, width INTEGER, height INTEGER,
+      chat TEXT NOT NULL DEFAULT '[]', revision INTEGER NOT NULL DEFAULT 1, created_by INTEGER REFERENCES users(id),
+      updated_by INTEGER REFERENCES users(id), created REAL NOT NULL, updated REAL NOT NULL)''',
     'settings': 'CREATE TABLE settings(scope TEXT PRIMARY KEY, content TEXT NOT NULL)',
     # Also the change feed for bank writes (action 'bank:<METHOD> <path>').
     'audit': '''CREATE TABLE audit(id INTEGER PRIMARY KEY, user_id INTEGER, action TEXT NOT NULL, target TEXT,

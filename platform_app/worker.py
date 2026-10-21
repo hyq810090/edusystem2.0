@@ -102,6 +102,8 @@ def create_app():
     handout_export.register(engine)
     from platform_app import mineru_fastpath
     mineru_fastpath.register(engine)
+    from platform_app import ggb_ai
+    ggb_ai.register(engine)
     from starlette.responses import JSONResponse
     active_requests=0
     @engine.app.middleware('http')

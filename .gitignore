@@ -20,3 +20,6 @@ __pycache__/
 .venv/
 .DS_Store
 Thumbs.db
+
+# Self-hosted GeoGebra (about 115 MB; scripts/fetch_geogebra.py fetches the pinned version)
+platform_app/vendor/

@@ -8,11 +8,14 @@ from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 
-from platform_app import admin, auth, bank, handouts, imports, previews, spaces, store
+from platform_app import admin, auth, bank, drawings, handouts, imports, previews, spaces, store
 from platform_app.auth import actor, public_user, space_access
 from platform_app.workers import Workers
 
 WEB = store.ROOT / 'platform_app/web'
+# Self-hosted GeoGebra Classic (non-commercial license), fetched by scripts/fetch_geogebra.py; not in Git.
+GEOGEBRA = store.ROOT / 'platform_app/vendor/geogebra'
+GEOGEBRA_PATH = '/platform/geogebra/'
 
 
 @asynccontextmanager
@@ -24,7 +27,7 @@ async def lifespan(app):
 
 
 app = FastAPI(title='MathBank 账号与空间版', lifespan=lifespan, docs_url=None, redoc_url=None)
-for module in (auth, admin, spaces, imports, previews, handouts, bank):
+for module in (auth, admin, spaces, imports, previews, handouts, drawings, bank):
     app.include_router(module.router)
 
 
@@ -63,7 +66,10 @@ async def security(request, call_next):
     response.headers['X-Content-Type-Options'] = 'nosniff'
     response.headers['Referrer-Policy'] = 'same-origin'
     response.headers['X-Frame-Options'] = 'SAMEORIGIN'
-    if not path.startswith('/static/lib/'):
+    if path.startswith(GEOGEBRA_PATH):
+        # The self-hosted GeoGebra is about 115 MB under a versioned path; it never changes in place.
+        response.headers['Cache-Control'] = 'public, max-age=31536000, immutable'
+    elif not path.startswith('/static/lib/'):
         response.headers['Cache-Control'] = 'no-store'
     return response
 
@@ -120,7 +126,8 @@ def inject(content, user, space, grant, secret, nav_collapsed=False):
                              ('</head>', '<link rel="stylesheet" href="/platform/web/platform.css"></head>'),
                              ('</main>', account_workspace() + '</main>'),
                              ('</body>', ''.join(f'<script src="/platform/web/{name}.js"></script>'
-                                                 for name in ('space-picker', 'account', 'paper-tools', 'import-view', 'mineru', 'handouts')) + '</body>')]:
+                                                 for name in ('space-picker', 'account', 'paper-tools', 'import-view', 'mineru', 'handouts',
+                                                              'drawings')) + '</body>')]:
         content = content.replace(marker, addition, 1)
     return content
 
@@ -143,6 +150,7 @@ async def workbench(space_id: int, request: Request):
 
 
 app.mount('/platform/web', StaticFiles(directory=WEB), name='platform-web')
+app.mount(GEOGEBRA_PATH.rstrip('/'), StaticFiles(directory=GEOGEBRA, check_dir=False), name='geogebra')
 # Uploads are served per space by the bank router above; this snapshot holds
 # no private uploads or databases. All product libraries are original MathBank.
 app.mount('/static', StaticFiles(directory=store.ROOT / 'engine/static'), name='static')
