@@ -1,7 +1,7 @@
 """讲义 Word export, run inside a space's worker.
 
 The same layout as the PDF (templates/handout/mathbank-handout.sty): accent
-colour, heading hierarchy, shared per-section numbering, tinted definition
+colour, heading hierarchy, per-section numbering (each kind counts on its own), tinted definition
 boxes, framed theorems, side-ruled notes. Questions go through the engine's
 Word paper builder, so formulas are editable OMML and figures and choices are
 laid out as in papers. Fonts are the ones teachers' Word has: 宋体 and Times
@@ -249,12 +249,12 @@ def build(engine, payload):
         paragraph = heading('', 15, before=18, after=6)
         w._set_run_font(paragraph.add_run(f'{number}  '), 15, bold=True, color=ACCENT, cjk_font=w.CJK_HEADING_FONT)
         w._set_run_font(paragraph.add_run(section['title']), 15, bold=True, color=INK, cjk_font=w.CJK_HEADING_FONT)
-        counter = 0
+        counters = {}  # each kind counts on its own: 定义 1.1, 1.2 …; 例 1.1 …
         for block in section['blocks']:
             kind = block['kind']
             if kind in {'definition', *THEOREMS, 'example', 'figure'}:
-                counter += 1
-            tag = f'{number}.{counter}'
+                counters[kind] = counters.get(kind, 0) + 1
+            tag = f'{number}.{counters.get(kind, 0)}'
             titled = f"{tag}  {block['title']}" if block.get('title') else tag
             if kind == 'text':
                 prose(block['body'])

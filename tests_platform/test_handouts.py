@@ -190,7 +190,7 @@ def test_word_export_mirrors_the_template(system):  # noqa: F811
         name = unquote(response.headers['content-disposition'].split("''", 1)[1])
         assert name == f"导出讲义（{'教师版' if version == 'teacher' else '学生版'}）.docx"
         text, document = docx_text(response.content)
-        for expected in ('第 3 讲', '导出讲义', '学习目标', '定义 1.1  正弦', '定理 1.2', '易错', '例 1.3  基础',
+        for expected in ('第 3 讲', '导出讲义', '学习目标', '定义 1.1  正弦', '定理 1.1', '易错', '例 1.1  基础',
                          '基础练习', '本节小结', '1  概念', '2  练习', '证明'):
             assert expected in text, expected
         header = ''.join(p.text for p in document.sections[0].header.paragraphs)
@@ -200,11 +200,35 @@ def test_word_export_mirrors_the_template(system):  # noqa: F811
         else:
             assert '参考答案' not in text and '由定义得' not in text and '学生版' in text
         # As in the PDF: the example's stem and its figure side by side, the choices below at full width.
-        beside = [t for t in document.tables if len(t.columns) == 2 and t.cell(0, 0).text.startswith('例 1.3')]
+        beside = [t for t in document.tables if len(t.columns) == 2 and t.cell(0, 0).text.startswith('例 1.1')]
         assert beside and beside[0].cell(0, 1)._tc.xpath('.//w:drawing')
         assert '<wp:anchor' not in zipfile.ZipFile(BytesIO(response.content)).read('word/document.xml').decode()
         assert any(t.cell(0, 0).text.strip().startswith('A.') and len(t.columns) == 4 for t in document.tables)
     assert system.get(f'{handouts(space)}/{hid}/export', params={'format': 'html'}).status_code == 400
+
+
+def test_each_kind_counts_on_its_own_within_a_section(system):  # noqa: F811
+    """定义 1.1, 例 1.1, 性质 1.1, 例 1.2, 定义 1.2, 图 1.1; a new section starts again at 2.1."""
+    space = new_space(system, '讲义编号')['id']
+    image = picture(space, 'hd-number.png')
+    first, second = (question(system, space, content=f'求第 {n} 个值。').json()['question'] for n in (1, 2))
+    one, two = snapshots(system, space, [first['id'], second['id']])
+    example = {'kind': 'example', 'title': '', 'solution': '', 'space': 2}
+    document = {'kicker': '', 'subtitle': '', 'objectives': [], 'settings': {'student_solutions': 'blank'}, 'sections': [
+        {'title': '集合', 'blocks': [
+            {'kind': 'definition', 'title': '集合', 'body': '对象的全体。'}, {**example, 'question': one},
+            {'kind': 'property', 'title': '', 'body': '确定性。'}, {**example, 'question': two},
+            {'kind': 'definition', 'title': '子集', 'body': '包含关系。'},
+            {'kind': 'figure', 'image': image, 'caption': '韦恩图', 'size': 'small'}]},
+        {'title': '运算', 'blocks': [{'kind': 'definition', 'title': '交集', 'body': '公共元素。'}]}]}
+    hid = system.post(handouts(space), json={'title': '编号', 'document': document}).json()['id']
+    response = system.get(f'{handouts(space)}/{hid}/export', params={'format': 'docx', 'version': 'student'})
+    assert response.status_code == 200, response.text
+    text, _ = docx_text(response.content)
+    order = ['定义 1.1', '例 1.1', '性质 1.1', '例 1.2', '定义 1.2', '图 1.1', '定义 2.1']
+    positions = [text.find(label) for label in order]
+    assert -1 not in positions and positions == sorted(positions), dict(zip(order, positions))
+    assert not any(old in text for old in ('性质 1.3', '例 1.4', '定义 1.5', '图 1.6'))  # the former shared count
 
 
 def test_latex_source_uses_the_template_blocks(tmp_path):
@@ -222,7 +246,7 @@ def test_latex_source_uses_the_template_blocks(tmp_path):
     student, teacher = render('student'), render('teacher')
     assert r'\usepackage{mathbank-handout}' in student and r'\documentclass[fontset=fandol]{exam-zh}' in student
     assert r'\begin{mbdefinition}{正弦}' in student and r'\textbf{正弦}' in student and r'\begin{itemize}' in student
-    assert r'\begin{mbtheorem}{定理}{}' in student and r'\begin{mbnote}{易错}{mbAccent}' in student
+    assert r'\begin{mbtheorem}{theorem}{定理}{}' in student and r'\begin{mbnote}{易错}{mbAccent}' in student
     assert r'100\% 的学生 \& 老师' in student and r'三角函数 \& 应用' in student
     assert r'\mbexamplelabel{基础}' in student and r'\mbanswerspace{3}' in student
     # \paren supplies the brackets; the stem's own empty pair is dropped.

@@ -1,7 +1,7 @@
 /* 讲义 workspace: textbook-style handouts of the current space.
    - library: lesson folders (two levels, as in 试卷管理) beside the handout list;
    - editor: an outline, the page drawn with the PDF template's structure and
-     shared per-section numbering, and an inspector for the selected item.
+     per-section numbering (each kind counts on its own), and an inspector for the selected item.
    Questions are inserted as snapshots; edits autosave against the server
    revision so two editors never overwrite each other. Exports (PDF/Word,
    student/teacher) are made on the server from the saved document. */
@@ -681,12 +681,16 @@
         }
         return null;
     }
-    // Shared per-section numbering of definitions, theorems, examples and figures.
+    // Per-section numbering, one counter per kind: 定义 1.1, 1.2 …; 例 1.1, 1.2 …; 性质 1.1 ….
     function numbering() {
         const tags = {};
         sections().forEach((part, s) => {
-            let counter = 0;
-            for (const block of part.blocks) if (NUMBERED.has(block.kind)) tags[block.id] = `${s + 1}.${++counter}`;
+            const counters = {};
+            for (const block of part.blocks) {
+                if (!NUMBERED.has(block.kind)) continue;
+                counters[block.kind] = (counters[block.kind] || 0) + 1;
+                tags[block.id] = `${s + 1}.${counters[block.kind]}`;
+            }
         });
         return tags;
     }

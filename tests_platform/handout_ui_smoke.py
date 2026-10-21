@@ -87,7 +87,7 @@ with sync_playwright() as p:
     page.wait_for_function("document.querySelector('#handoutPicker .mb-status')?.textContent.startsWith('共 3')")
     picker.locator('.mb-xs-item').first.get_by_role('button', name='选用').click()
     page.wait_for_selector('.mb-ho-page .mb-ho-example')
-    assert '例 1.2' in page.locator('.mb-ho-page .mb-ho-example').inner_text()
+    assert '例 1.1' in page.locator('.mb-ho-page .mb-ho-example').inner_text()  # each kind counts on its own
     inspector.get_by_label('解答').fill('由定义可得结果。')
     page.locator('.mb-ho-add', has_text='添加内容').first.click()
     page.locator('.mb-ho-kind-menu').get_by_role('menuitem', name='练习').click()
@@ -100,7 +100,7 @@ with sync_playwright() as p:
     assert page.locator('.mb-ho-page .mb-ho-answers li').count() == 2
     checks.append('example and exercises inserted from the bank, answers listed for teachers')
 
-    # A figure, then moved above the example: numbers follow the order.
+    # A figure, then moved above the example: each kind keeps its own numbers.
     page.locator('.mb-ho-add', has_text='添加内容').first.click()
     page.locator('.mb-ho-kind-menu').get_by_role('menuitem', name='插图').click()
     inspector.locator('input[type=file]').set_input_files(str(figure))
@@ -108,9 +108,10 @@ with sync_playwright() as p:
     inspector.get_by_label('图注').fill('韦恩图')
     for _ in range(2):
         inspector.get_by_role('button', name='上移').click()
-    page.wait_for_function("document.querySelector('.mb-ho-page .mb-ho-figure .mb-ho-caption').textContent.startsWith('图 1.2')")
-    assert '例 1.3' in page.locator('.mb-ho-page .mb-ho-example').inner_text()
-    checks.append('figure uploaded and numbering follows a move')
+    page.wait_for_function("document.querySelector('.mb-ho-page .mb-ho-figure .mb-ho-caption').textContent.startsWith('图 1.1')")
+    assert '例 1.1' in page.locator('.mb-ho-page .mb-ho-example').inner_text()
+    assert '定义 1.1' in page.locator('.mb-ho-page .mb-ho-definition').first.inner_text()
+    checks.append('figure uploaded; definitions, examples and figures are numbered separately')
 
     # Student view hides solutions and answers and shows the answer space.
     page.get_by_role('button', name='学生版', exact=True).click()

@@ -57,9 +57,13 @@
   },
 }
 
-% One counter for definitions, theorems, examples and figures, per section: 1.1, 1.2 ...
-\newcounter{mbitem}[section]
-\renewcommand\thembitem{\arabic{section}.\arabic{mbitem}}
+% Each kind counts on its own within a section: 定义 1.1, 1.2 ...; 例 1.1, 1.2 ...; 性质 1.1 ...
+% The key is the block kind (definition, theorem, property, formula, corollary, example, figure).
+\newcommand\mbnewcount[1]{\newcounter{mbn#1}[section]%
+  \expandafter\def\csname thembn#1\endcsname{\arabic{section}.\arabic{mbn#1}}}
+\mbnewcount{definition}\mbnewcount{theorem}\mbnewcount{property}\mbnewcount{formula}
+\mbnewcount{corollary}\mbnewcount{example}\mbnewcount{figure}
+\newcommand\mbnumber[1]{\refstepcounter{mbn#1}\csname thembn#1\endcsname}
 \newcommand\mbtitlepart[1]{\if\relax\detokenize{#1}\relax\else\hspace{0.45em}{\mbsans #1}\fi}
 
 % ---------- Heading ----------
@@ -86,11 +90,11 @@
 \newtcolorbox{mbdefinition}[1]{enhanced, breakable, colback=mbTint, colframe=mbAccent, boxrule=0pt,
   leftrule=2.4pt, arc=0pt, outer arc=0pt, left=11pt, right=11pt, top=7pt, bottom=7pt,
   before skip=9pt, after skip=9pt,
-  before upper={\refstepcounter{mbitem}{\mbsans\color{mbAccent}定义~\thembitem}\mbtitlepart{#1}\quad}}
-% 定理、性质、公式、推论：细边框。#1 名称 #2 标题
-\newtcolorbox{mbtheorem}[2]{enhanced, breakable, colback=white, colframe=mbRule, boxrule=0.6pt, arc=2pt,
+  before upper={{\mbsans\color{mbAccent}定义~\mbnumber{definition}}\mbtitlepart{#1}\quad}}
+% 定理、性质、公式、推论：细边框。#1 种类（theorem、property、formula、corollary）#2 名称 #3 标题
+\newtcolorbox{mbtheorem}[3]{enhanced, breakable, colback=white, colframe=mbRule, boxrule=0.6pt, arc=2pt,
   left=11pt, right=11pt, top=7pt, bottom=7pt, before skip=9pt, after skip=9pt,
-  before upper={\refstepcounter{mbitem}{\mbsans\color{mbInk}#1~\thembitem}\mbtitlepart{#2}\quad}}
+  before upper={{\mbsans\color{mbInk}#2~\mbnumber{#1}}\mbtitlepart{#3}\quad}}
 \newenvironment{mbproof}
   {\par\addvspace{4pt}\noindent{\mbsans\color{mbMuted}证明}\quad\ignorespaces}
   {\nobreak\hfill$\square$\par\addvspace{6pt}}
@@ -104,7 +108,7 @@
 
 % 例题：深红标签与题干同行（题干旁有配图时标签随题干进左栏）；解答带左侧细线。
 \newenvironment{mbexample}{\par\addvspace{10pt}\noindent\ignorespaces}{\par\addvspace{6pt}}
-\newcommand\mbexamplelabel[1]{\refstepcounter{mbitem}{\mbsans\color{mbAccent}例~\thembitem}\mbtitlepart{#1}\quad}
+\newcommand\mbexamplelabel[1]{{\mbsans\color{mbAccent}例~\mbnumber{example}}\mbtitlepart{#1}\quad}
 \newtcolorbox{mbsolution}{blanker, breakable, borderline west={0.8pt}{0pt}{mbRule}, left=12pt,
   before skip=5pt, after skip=8pt, before upper={{\mbsans\color{mbAccent}解}\quad}}
 \newcommand\mbanswerspace[1]{\par\vspace*{#1cm}}
@@ -117,7 +121,7 @@
 
 % 插图：居中，图注在下。
 \newcommand\mbfigure[2]{\par\addvspace{6pt}\begin{center}#1\par\vspace{4pt}%
-  \refstepcounter{mbitem}{\small\sffamily\color{mbMuted}图~\thembitem\if\relax\detokenize{#2}\relax\else\quad #2\fi}%
+  {\small\sffamily\color{mbMuted}图~\mbnumber{figure}\if\relax\detokenize{#2}\relax\else\quad #2\fi}%
   \end{center}\addvspace{4pt}}
 
 % 参考答案（教师版，讲义末尾）。A heading never stays alone at a page foot.

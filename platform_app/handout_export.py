@@ -144,7 +144,7 @@ class Latex:
         if kind == 'definition':
             return rf"\begin{{mbdefinition}}{{{self.inline(block['title'])}}}" + '\n' + self.prose(block['body']) + '\n\\end{mbdefinition}'
         if kind in THEOREMS:
-            return (rf"\begin{{mbtheorem}}{{{THEOREMS[kind]}}}{{{self.inline(block['title'])}}}" + '\n'
+            return (rf"\begin{{mbtheorem}}{{{kind}}}{{{THEOREMS[kind]}}}{{{self.inline(block['title'])}}}" + '\n'
                     + self.prose(block['body']) + '\n\\end{mbtheorem}')
         if kind == 'proof':
             return '\\begin{mbproof}\n' + self.prose(block['body']) + '\n\\end{mbproof}'
