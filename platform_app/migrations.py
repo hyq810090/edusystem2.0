@@ -88,6 +88,19 @@ def single_bank_spaces():
                                                       ensure_ascii=False, indent=2), encoding='utf-8')
 
 
+def senior_math_editions():
+    """Offer 北师大版 and 湘教版 高中数学 on existing installs; existing textbooks and spaces are untouched."""
+    have = {(r["stage"], r["subject"], r["name"]) for r in store.rows("SELECT stage,subject,name FROM textbooks")}
+    missing = [(v, n) for v, n in store.SENIOR_MATH_BOOKS.items() if v in ("N", "X") and ("高中", "数学", n) not in have]
+    if not missing:
+        return
+    store.backup("senior-math-editions")
+    with store.db() as c:
+        c.executemany("INSERT INTO textbooks(stage,subject,name,engine_version,metadata) VALUES (?,?,?,?,?)",
+                      [("高中", "数学", name, version, json.dumps(store.senior_math_metadata(version), ensure_ascii=False))
+                       for version, name in missing])
+
+
 def add_table(name):
     """A new table is purely additive; it is still created after a backup like every step."""
     store.backup(f'add-{name}')
@@ -102,6 +115,7 @@ STEPS = [
     ('junior-math-grade9-v1', lambda: junior_math_grade9.migrate(store)),
     ('handouts-v1', lambda: add_table('handouts')),
     ('drawings-v1', lambda: add_table('drawings')),
+    ('senior-math-editions-v1', senior_math_editions),
 ]
 NAMES = [name for name, _ in STEPS]
 

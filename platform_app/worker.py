@@ -66,6 +66,7 @@ def create_app():
     paths.SCHEMA_SNAPSHOT_DIR=paths.DATA_BACKUP_DIR/'schema_snapshots'
     paths.SYSTEM_GENERATED_DIR=runtime/'.system_generated'
     paths.RETAINED_UPLOADS_DIR=paths.SYSTEM_GENERATED_DIR/'retained_uploads'
+    paths.EXPORT_PREFLIGHTS_DIR=paths.SYSTEM_GENERATED_DIR/'export_preflights'
     paths.DATABASE_FILE=paths.DATABASE_PATH=runtime/'math_question_bank.db'
     paths.ENV_FILE=runtime/'.env'
     # sqlite_url's default was bound when paths.py was imported.
@@ -104,6 +105,10 @@ def create_app():
     mineru_fastpath.register(engine)
     from platform_app import ggb_ai
     ggb_ai.register(engine)
+    from platform_app import pdf_ocr_cache
+    pdf_ocr_cache.register(engine)
+    from platform_app import knowledge_points
+    knowledge_points.register(engine,config)
     from starlette.responses import JSONResponse
     active_requests=0
     @engine.app.middleware('http')

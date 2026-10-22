@@ -168,7 +168,7 @@ async def create_textbook(request: Request):
     if body['subject'].strip() == '物理':
         metadata = physics_metadata.upgrade_defaults(metadata)
     version = body.get('engine_version', 'A')
-    if version not in {'A', 'B', 'S', 'H'}:
+    if version not in {'A', 'B', 'S', 'H', 'N', 'X'}:
         raise HTTPException(400, '内部存储版本无效')
     with store.db() as c:
         bid = c.execute('INSERT INTO textbooks(stage,subject,name,engine_version,metadata) VALUES (?,?,?,?,?)',

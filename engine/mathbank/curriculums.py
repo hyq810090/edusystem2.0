@@ -17,6 +17,9 @@ CURRICULUM_NAMES = {
     "B": "人教B版",
     "S": "苏教版",
     "H": "沪教版",
+    # Ported from MathBank 3.0 (resources/curriculums/N.json, X.json).
+    "N": "北师大版",
+    "X": "湘教版",
 }
 
 DEFAULT_QUESTION_TYPES = [

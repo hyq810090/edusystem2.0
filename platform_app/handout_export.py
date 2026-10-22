@@ -242,10 +242,30 @@ class Latex:
         return collect_referenced_images(self.sources, self.engine.UPLOAD_DIR, self.engine.UPLOAD_DIR_REL)
 
 
+class MissingImages(ValueError):
+    pass
+
+
+def checked_images(engine, builder, tex):
+    """Every image the handout uses must be on disk before export (the papers' export_preflight)."""
+    from mathbank.export_preflight import ExportPreflightError, preflight_paper_export
+    try:
+        return preflight_paper_export(builder.sources, {'handout.tex': tex}, target='handout',
+                                      uploads_dir=engine.UPLOAD_DIR, upload_url_prefix=engine.UPLOAD_DIR_REL)[1]
+    except ExportPreflightError as error:
+        names = list(dict.fromkeys(item['reference'].rsplit('/', 1)[-1] for item in error.report['errors']))
+        raise MissingImages(f'讲义里有 {len(names)} 张图片找不到：{"、".join(names[:6])}。'
+                            '请在讲义或题库中重新上传或删去这些图片后再导出。') from None
+
+
 def pdf(engine, payload):
     builder = Latex(engine, payload)
     tex = builder.render()
-    data, log = engine.compile_tex_to_pdf(tex, builder.images())
+    try:
+        images = checked_images(engine, builder, tex)
+    except MissingImages as error:
+        return None, str(error)
+    data, log = engine.compile_tex_to_pdf(tex, images)
     return (data, None) if data else (None, 'PDF 编译失败：' + str(log)[-1500:])
 
 
@@ -271,4 +291,9 @@ def register(engine):
 
 def docx(engine, payload):
     from platform_app.handout_word import build
+    builder = Latex(engine, payload)
+    try:
+        checked_images(engine, builder, builder.render())
+    except MissingImages as error:
+        return None, str(error)
     return build(engine, payload)

@@ -23,6 +23,8 @@ PRE_RESTORE_BACKUP_DIR = DATA_BACKUP_DIR / "pre_restore"
 SCHEMA_SNAPSHOT_DIR = DATA_BACKUP_DIR / "schema_snapshots"
 SYSTEM_GENERATED_DIR = PROJECT_ROOT / ".system_generated"
 RETAINED_UPLOADS_DIR = SYSTEM_GENERATED_DIR / "retained_uploads"
+# Image checks of paper exports (mathbank.export_preflight, ported from MathBank 3.0).
+EXPORT_PREFLIGHTS_DIR = SYSTEM_GENERATED_DIR / "export_preflights"
 
 DATABASE_FILE = PROJECT_ROOT / "math_question_bank.db"
 DATABASE_PATH = DATABASE_FILE

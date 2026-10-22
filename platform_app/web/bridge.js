@@ -60,10 +60,33 @@
             window.showToast(`已按整卷方式拆题（${report.reason_text}），用时 ${seconds} 秒。`, 'info');
         }
     }
+    // PDF pages recognised before are reused (platform_app/pdf_ocr_cache.py); say so when a task ends.
+    const pdfTasks = new Set();
+    async function announceOcrReuse(path, response) {
+        const body = await response.json().catch(() => ({}));
+        if (path === '/api/upload/pdf-task') {
+            if (body?.task_id) pdfTasks.add(body.task_id);
+            return;
+        }
+        const id = path.split('/')[3];
+        if (!pdfTasks.has(id) || !['completed', 'error'].includes(body?.status)) return;
+        pdfTasks.delete(id);
+        const report = await window.fetch(`/api/tasks/${encodeURIComponent(id)}/ocr-reuse`)
+            .then(r => r.ok ? r.json() : null).catch(() => null);
+        if (!report || !window.showToast) return;
+        if (body.status === 'completed' && report.reused.length) {
+            window.showToast(`${report.reused.length} 页沿用了此前的识别结果，没有再次调用识图模型。`, 'info');
+        } else if (body.status === 'error') {
+            const kept = new Set([...report.reused, ...report.saved]).size;
+            if (kept) window.showToast(`已识别的 ${kept} 页已保存；用相同设置重新解析这份 PDF 时会直接沿用，只识别其余页面。`, 'info');
+        }
+    }
     window.fetch = (input, init = {}) => {
         const url = new URL(input instanceof Request ? input.url : String(input), location.href);
         if (url.origin !== location.origin) return nativeFetch(input, init);
         if (url.pathname.startsWith('/api/')) {
+            const path = url.pathname;
+            const pdfTask = path === '/api/upload/pdf-task' || /^\/api\/tasks\/[^/]+\/status$/.test(path);
             if (url.pathname === '/api/papers' && ctx.folders.filter) url.searchParams.set('folder_id', ctx.folders.filter);
             if (url.pathname === '/api/paper/save' && typeof init.body === 'string') {
                 init = {...init, body: JSON.stringify({...JSON.parse(init.body), platform_folder_id: ctx.folders.save})};
@@ -83,6 +106,7 @@
             url.pathname = `/bank/${space.id}${url.pathname}`;
             const sent = send(input, init, url);
             if (fast) sent.then(response => announceFastPath(response.clone())).catch(() => {});
+            if (pdfTask) sent.then(response => announceOcrReuse(path, response.clone())).catch(() => {});
             return sent;
         }
         if (url.pathname.startsWith('/platform/api/') || url.pathname.startsWith('/bank/')) return send(input, init);

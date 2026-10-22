@@ -146,6 +146,17 @@ def initialize():
     seed()
 
 
+# 高中数学 textbooks shipped with the engine; 北师大版 and 湘教版 come from MathBank 3.0.
+SENIOR_MATH_BOOKS = {'A': '人教A版', 'B': '人教B版', 'S': '苏教版', 'H': '沪教版', 'N': '北师大版', 'X': '湘教版'}
+
+
+def senior_math_metadata(version):
+    curriculum = json.loads((ROOT / 'engine/mathbank/resources/curriculums' / f'{version}.json').read_text(encoding='utf-8'))
+    types = [{'value': k, 'label': v} for k, v in [('single_choice', '单选题'), ('multi_choice', '多选题'),
+                                                  ('fill_in_blank', '填空题'), ('detailed_answer', '解答题')]]
+    return fix_metadata({'curriculum': curriculum, 'question_types': types, 'grades': ['高一', '高二', '高三']})
+
+
 def seed():
     with db() as c:
         if not c.execute('SELECT 1 FROM users').fetchone():
@@ -157,13 +168,9 @@ def seed():
             credentials.write_text('用户名：admin\n密码：' + password + '\n请登录后修改初始密码。\n', encoding='utf-8')
             credentials.chmod(0o600)
         if not c.execute('SELECT 1 FROM textbooks').fetchone():
-            types = [{'value': k, 'label': v} for k, v in [('single_choice', '单选题'), ('multi_choice', '多选题'),
-                                                          ('fill_in_blank', '填空题'), ('detailed_answer', '解答题')]]
-            for version, name in {'A': '人教A版', 'B': '人教B版', 'S': '苏教版', 'H': '沪教版'}.items():
-                curriculum = json.loads((ROOT / 'engine/mathbank/resources/curriculums' / f'{version}.json').read_text(encoding='utf-8'))
-                metadata = fix_metadata({'curriculum': curriculum, 'question_types': types, 'grades': ['高一', '高二', '高三']})
+            for version, name in SENIOR_MATH_BOOKS.items():
                 c.execute('INSERT INTO textbooks(stage,subject,name,engine_version,metadata) VALUES (?,?,?,?,?)',
-                          ('高中', '数学', name, version, json.dumps(metadata, ensure_ascii=False)))
+                          ('高中', '数学', name, version, json.dumps(senior_math_metadata(version), ensure_ascii=False)))
         if not c.execute('SELECT 1 FROM spaces').fetchone():
             c.execute("INSERT INTO spaces(name,kind,owner_id,team_id,textbook_id,created) VALUES ('我的备课空间','personal',1,1,1,?)",
                       (time.time(),))

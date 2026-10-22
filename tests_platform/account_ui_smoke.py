@@ -90,7 +90,7 @@ with sync_playwright() as p:
     assert '启用学段' not in page.locator('#qaWorkspaceSection').inner_text()
     page.screenshot(path=str(out/'integrated-qa.png'), full_page=True, animations='disabled')
     page.locator('#qaResetFilters').click()
-    assert page.locator('.qa-question:visible').count() == 33
+    assert page.locator('.qa-question:visible').count() == 37
 
     page.locator('#appNavMine').click()
     page.get_by_role('button', name='我的账号', exact=True).click()
@@ -138,7 +138,7 @@ with sync_playwright() as p:
     tp.locator('#loginForm').wait_for()
     login(tp, username, teacher_password+'x')
     assert not errors, errors
-    report = {'passed': True, 'qa_entries': 33, 'errors': errors,
+    report = {'passed': True, 'qa_entries': 37, 'errors': errors,
               'checks': ['login', 'my workspace without navigation', 'unsaved import title retained', 'create account in dialog',
                          'create shared space', 'per-member permission saved', 'FAQ search/category/reset', 'dark mode',
                          '390px navigation and dialog', 'teacher permission UI', 'change password and login']}

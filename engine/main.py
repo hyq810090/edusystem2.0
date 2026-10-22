@@ -69,6 +69,7 @@ from mathbank.question_duplicate_service import (
     upsert_question_fingerprint,
     visible_image_signatures as build_visible_image_signatures,
 )
+from mathbank.export_preflight import ExportPreflightError, preflight_paper_export, read_export_preflight
 from mathbank.paper_helper import build_latex_document, build_answer_sheet_latex, compile_tex_to_pdf, create_tex_zip_package, create_full_bundle_zip_package, collect_referenced_images, build_restricted_tex_environment
 from mathbank.word_export_helper import build_word_document, create_word_bundle_zip
 from mathbank.runtime_components import (
@@ -2247,6 +2248,13 @@ def require_expected_curriculum_version(expected_version_code):
             raise HTTPException(status_code=409, detail="教材版本已切换，请重新载入分类后保存")
 
 
+def apply_knowledge_point_filters(query, codes, match_mode="any", role_scope="main", unlabeled=False):
+    """Knowledge-point filter with MathBank 3.0's parameters; the account platform provides it."""
+    if codes or unlabeled:
+        raise ValueError("此题库未启用考查知识点。")
+    return query
+
+
 @app.get("/api/questions")
 def list_questions(
     q: str = None,
@@ -2267,6 +2275,10 @@ def list_questions(
     page: Optional[int] = None,
     page_size: int = 20,
     sort: str = "desc",
+    knowledge_point_codes: Optional[List[str]] = Query(None),
+    knowledge_point_mode: str = "any",
+    knowledge_point_role: str = "main",
+    knowledge_point_unlabeled: bool = False,
     db: Session = Depends(get_db)
 ):
     search_q = q or search
@@ -2322,6 +2334,10 @@ def list_questions(
             query, comp_val, chap_val, know_val,
             include_sub_knowledge=include_sub_knowledge,
             sub_knowledge=paths, sub_knowledge_mode=sub_knowledge_mode,
+        )
+        query = apply_knowledge_point_filters(
+            query, knowledge_point_codes or [], match_mode=knowledge_point_mode,
+            role_scope=knowledge_point_role, unlabeled=knowledge_point_unlabeled,
         )
     except (ValueError, TypeError) as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
@@ -7031,6 +7047,15 @@ def _prepare_paper_export_questions(questions_input, db: Session) -> list[dict]:
     return questions_data
 
 
+@app.get("/api/paper/export/preflight/{report_id}")
+def get_paper_export_preflight(report_id: str):
+    """The image check record of one export (paths and hashes only, no question text)."""
+    try:
+        return {"status": "success", "preflight": read_export_preflight(report_id)}
+    except (OSError, ValueError):
+        return JSONResponse(content={"status": "error", "message": "导出检查记录不存在或已过期。"}, status_code=404)
+
+
 @app.post("/api/paper/export/tex")
 def export_paper_tex(payload: dict, db: Session = Depends(get_db)):
     """导出 LaTeX 源码 ZIP 压缩包"""
@@ -7051,15 +7076,23 @@ def export_paper_tex(payload: dict, db: Session = Depends(get_db)):
         else:
             tex_answer_sheet = None
 
-        image_paths = collect_referenced_images(questions_data, UPLOAD_DIR, UPLOAD_DIR_REL)
+        # Every referenced image must be on disk before compiling (export_preflight, from MathBank 3.0).
+        preflight, image_paths = preflight_paper_export(
+            questions_data, {"main.tex": tex_main, "answers.tex": tex_ans, "answer_sheet.tex": tex_answer_sheet or ""}, target="tex",
+            uploads_dir=UPLOAD_DIR, upload_url_prefix=UPLOAD_DIR_REL)
         zip_bytes = create_tex_zip_package(title, tex_main, tex_ans, image_paths, answer_sheet_tex=tex_answer_sheet)
         
         from urllib.parse import quote
         safe_title = re.sub(r'[/\\?%*:|"<>]', '_', title.strip()) or "试卷"
         encoded_filename = quote(f"{safe_title}.zip")
         return Response(content=zip_bytes, media_type="application/zip", headers={
-            "Content-Disposition": f"attachment; filename=\"paper_export.zip\"; filename*=utf-8''{encoded_filename}"
+            "Content-Disposition": f"attachment; filename=\"paper_export.zip\"; filename*=utf-8''{encoded_filename}",
+            "X-Export-Preflight-ID": preflight["id"],
         })
+    except ExportPreflightError as e:
+        return JSONResponse(content={"status": "error", "message": str(e), "preflight": e.report, "diagnostic": {
+            "summary": str(e), "fixes": ["在题库中打开报出的题目，重新上传缺失的图片，或删去对应的图片引用后再导出。"]}},
+            status_code=400)
     except PaperExportValidationError as e:
         return JSONResponse(content={"status": "error", "message": str(e)}, status_code=400)
     except Exception as e:
@@ -7085,7 +7118,10 @@ def export_paper_bundle(payload: dict, db: Session = Depends(get_db)):
         else:
             tex_answer_sheet = None
 
-        image_paths = collect_referenced_images(questions_data, UPLOAD_DIR, UPLOAD_DIR_REL)
+        # Every referenced image must be on disk before compiling (export_preflight, from MathBank 3.0).
+        preflight, image_paths = preflight_paper_export(
+            questions_data, {"main.tex": tex_main, "answers.tex": tex_ans, "answer_sheet.tex": tex_answer_sheet or ""}, target="bundle",
+            uploads_dir=UPLOAD_DIR, upload_url_prefix=UPLOAD_DIR_REL)
 
         # Pre-compile PDFs
         main_pdf_bytes, _ = compile_tex_to_pdf(tex_main, image_paths)
@@ -7094,6 +7130,9 @@ def export_paper_bundle(payload: dict, db: Session = Depends(get_db)):
             answer_sheet_pdf_bytes, _ = compile_tex_to_pdf(tex_answer_sheet, image_paths)
         else:
             answer_sheet_pdf_bytes = None
+        if not main_pdf_bytes or not ans_pdf_bytes or (tex_answer_sheet and not answer_sheet_pdf_bytes):
+            return JSONResponse(content={"status": "error", "message": "全套归档的 PDF 编译失败，未生成不完整归档。",
+                                         "preflight": preflight}, status_code=400)
 
         zip_bytes = create_full_bundle_zip_package(
             title, tex_main, tex_ans, image_paths,
@@ -7108,8 +7147,13 @@ def export_paper_bundle(payload: dict, db: Session = Depends(get_db)):
         filename = f"{safe_title}_全套归档.zip"
         encoded_filename = quote(filename)
         return Response(content=zip_bytes, media_type="application/zip", headers={
-            "Content-Disposition": f"attachment; filename=\"paper_bundle.zip\"; filename*=utf-8''{encoded_filename}"
+            "Content-Disposition": f"attachment; filename=\"paper_bundle.zip\"; filename*=utf-8''{encoded_filename}",
+            "X-Export-Preflight-ID": preflight["id"],
         })
+    except ExportPreflightError as e:
+        return JSONResponse(content={"status": "error", "message": str(e), "preflight": e.report, "diagnostic": {
+            "summary": str(e), "fixes": ["在题库中打开报出的题目，重新上传缺失的图片，或删去对应的图片引用后再导出。"]}},
+            status_code=400)
     except PaperExportValidationError as e:
         return JSONResponse(content={"status": "error", "message": str(e)}, status_code=400)
     except Exception as e:
@@ -7177,13 +7221,17 @@ def export_paper_pdf(payload: dict, db: Session = Depends(get_db)):
         else:
             tex_content = build_latex_document(title, subtitle, paper_type, questions_data, include_answers=include_answers, show_secret=show_secret, show_notice=show_notice, question_types=METADATA_CACHE.get("question_types", []), section_order=payload.get("section_order"))
 
-        image_paths = collect_referenced_images(questions_data, UPLOAD_DIR, UPLOAD_DIR_REL)
+        # Every referenced image must be on disk before compiling (export_preflight, from MathBank 3.0).
+        preflight, image_paths = preflight_paper_export(
+            questions_data, {"paper.tex": tex_content}, target="pdf",
+            uploads_dir=UPLOAD_DIR, upload_url_prefix=UPLOAD_DIR_REL)
         pdf_bytes, log_or_err = compile_tex_to_pdf(tex_content, image_paths)
         
         if pdf_bytes:
             filename = f"sheet_{datetime.datetime.now().strftime('%Y%m%d_%H%M%S')}.pdf" if target == "sheet" else f"paper_{datetime.datetime.now().strftime('%Y%m%d_%H%M%S')}.pdf"
             return Response(content=pdf_bytes, media_type="application/pdf", headers={
-                "Content-Disposition": f'inline; filename="{filename}"'
+                "Content-Disposition": f'inline; filename="{filename}"',
+                "X-Export-Preflight-ID": preflight["id"],
             })
         else:
             diagnostic = explain_latex_compile_error(log_or_err, tex_content)
@@ -7195,6 +7243,10 @@ def export_paper_pdf(payload: dict, db: Session = Depends(get_db)):
                 },
                 status_code=400,
             )
+    except ExportPreflightError as e:
+        return JSONResponse(content={"status": "error", "message": str(e), "preflight": e.report, "diagnostic": {
+            "summary": str(e), "fixes": ["在题库中打开报出的题目，重新上传缺失的图片，或删去对应的图片引用后再导出。"]}},
+            status_code=400)
     except PaperExportValidationError as e:
         return JSONResponse(content={"status": "error", "message": str(e)}, status_code=400)
     except Exception as e:
@@ -7245,6 +7297,14 @@ def export_paper_word(payload: dict, db: Session = Depends(get_db)):
         as_single_docx = bool(payload.get("as_single_docx", False))
         include_answers = bool(payload.get("include_answers", False))
         questions_data = _prepare_paper_export_questions(questions_input, db)
+        # Word embeds the same files; check them on the LaTeX of this paper first (export_preflight).
+        preflight_paper_export(
+            questions_data,
+            {"word.tex": build_latex_document(title, subtitle, paper_type, questions_data, include_answers=True,
+                                              show_secret=show_secret, show_notice=show_notice,
+                                              question_types=METADATA_CACHE.get("question_types", []),
+                                              section_order=payload.get("section_order"))},
+            target="word", uploads_dir=UPLOAD_DIR, upload_url_prefix=UPLOAD_DIR_REL)
 
         from urllib.parse import quote
         safe_title = re.sub(r'[/\\?%*:|"<>]', "_", title.strip()) or "试卷"
@@ -7319,6 +7379,10 @@ def export_paper_word(payload: dict, db: Session = Depends(get_db)):
                 "X-Word-Answer-Card-Omitted": "1" if main_diag.get("answer_card_omitted") else "0",
             },
         )
+    except ExportPreflightError as e:
+        return JSONResponse(content={"status": "error", "message": str(e), "preflight": e.report, "diagnostic": {
+            "summary": str(e), "fixes": ["在题库中打开报出的题目，重新上传缺失的图片，或删去对应的图片引用后再导出。"]}},
+            status_code=400)
     except PaperExportValidationError as e:
         return JSONResponse(
             content={"status": "error", "message": str(e)}, status_code=400

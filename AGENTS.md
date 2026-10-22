@@ -58,3 +58,10 @@
   - 题目引用一律经引擎原有上传接口复制图片，不直接引用绘图。
   - 改动须保持 `tests_platform/test_drawings.py` 与 `drawing_ui_smoke.py` 通过，后者断网验证不访问任何外部地址。
   - GeoGebra 免费许可仅限非商业用途。
+
+- MathBank 3.0 移植（2026-10-22）：
+  - 导出前图片检查：引擎 `mathbank/export_preflight.py` 原样取自 3.0.1，试卷 tex/pdf/bundle/word 导出缺图返回 400（含 `preflight` 报告与题号），报告 id 经 `X-Export-Preflight-ID` 透传；讲义在 `handout_export.checked_images` 中做同样检查，返回 422。回归 `tests_platform/test_export_preflight.py`。
+  - 北师大版（N）、湘教版（X）高中数学目录取自 3.0；新安装由 `store.SENIOR_MATH_BOOKS` 播种，已有安装由迁移 `senior-math-editions-v1` 补齐。回归 `test_textbook_editions.py`。
+  - PDF 识别复用（`platform_app/pdf_ocr_cache.py`）：只包装引擎 `request_pdf_vision` 的 page_ocr、joint_page、regions、figure_layout 四类请求（引擎各模块按名导入，须逐个模块替换），键为页面请求体＋模型＋接口；命中时仍用调用方的校验函数重验，`visual_calls=0`。整卷拆题（paper_split）不得缓存。缓存不存 Key。回归 `test_pdf_ocr_reuse.py`（假识图模型、扫描件 PDF、失败后重试只发缺页）。
+  - 考查知识点（`platform_app/knowledge_points.py`、`web/knowledge-points.js`）：目录 `platform_app/resources/knowledge_points.json` 只能由 `scripts/derive_knowledge_points.py` 从上游文件生成，不手改，编码与上游一致。题目标注存于各空间题库库内的平台表 `platform_question_points`（触发器随题目删除），不改引擎 ORM 与 schema 版本。引擎 `list_questions` 只加了 3.0 同名参数（knowledge_point_codes/_mode/_role/_unlabeled）和可替换的 `apply_knowledge_point_filters`，平台仅在高中数学空间替换。AI 建议的每一条须逐字引用题干、答案或评析，编码须在目录内。界面改动须保持 `test_knowledge_points.py` 与 `knowledge_point_ui_smoke.py` 通过。
+  - 平台代理转发查询参数须用 `request.query_params.multi_items()`；直接传 mapping 只保留同名参数的最后一个（曾使知识点和细分知识点的多值筛选失效）。

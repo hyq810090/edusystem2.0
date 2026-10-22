@@ -127,7 +127,7 @@ def inject(content, user, space, grant, secret, nav_collapsed=False):
                              ('</main>', account_workspace() + '</main>'),
                              ('</body>', ''.join(f'<script src="/platform/web/{name}.js"></script>'
                                                  for name in ('space-picker', 'account', 'paper-tools', 'import-view', 'mineru', 'handouts',
-                                                              'drawings')) + '</body>')]:
+                                                              'drawings', 'knowledge-points')) + '</body>')]:
         content = content.replace(marker, addition, 1)
     return content
 

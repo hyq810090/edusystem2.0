@@ -106,14 +106,15 @@ async def bank(space_id: int, path: str, request: Request):
                 parts.append((key, (value.filename, await value.read(), value.content_type)))
             else:
                 parts.append((key, (None, rewrite_assets(value, space_id, False))))
-        result = await workers.call(worker, request.method, target, params=request.query_params, files=parts)
+        # multi_items keeps repeated keys (sub_knowledge, knowledge_point_codes); a mapping keeps the last only.
+        result = await workers.call(worker, request.method, target, params=request.query_params.multi_items(), files=parts)
     else:
         if body and 'application/json' in content_type:
             body = json.dumps(rewrite_assets(json.loads(body), space_id, False), ensure_ascii=False).encode()
         elif body and 'application/x-www-form-urlencoded' in content_type:
             body = urlencode([(k, rewrite_assets(v, space_id, False))
                               for k, v in parse_qsl(body.decode(), keep_blank_values=True)]).encode()
-        result = await workers.call(worker, request.method, '/api/' + path, params=request.query_params,
+        result = await workers.call(worker, request.method, '/api/' + path, params=request.query_params.multi_items(),
                                     content=body, headers={'content-type': content_type} if content_type else {})
     if not is_read and result.status_code < 400:
         record_write(user, space_id, request.method, path, result, folder_id)
@@ -162,5 +163,6 @@ def proxy_result(result, path, space_id):
               FROM origins WHERE space_id=? AND question_id=?''', (space_id, value['id']))
         return JSONResponse(rewrite_assets(value, space_id), status_code=result.status_code)
     headers = {k: v for k, v in result.headers.items()
-               if k.lower() in {'content-type', 'content-disposition'} or k.lower().startswith('x-word-')}
+               if k.lower() in {'content-type', 'content-disposition', 'x-export-preflight-id'}
+               or k.lower().startswith('x-word-')}
     return Response(result.content, status_code=result.status_code, headers=headers)
