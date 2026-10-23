@@ -135,8 +135,18 @@ with sync_playwright() as p:
     stale.goto(BASE+f'/workbench/{sid}')
     stale.wait_for_function(ready)
     stale.wait_for_load_state('networkidle')
-    # Hold background polling so this assertion drives the first stale read.
-    stale.route('**/bank/**', lambda route: route.continue_() if 'stale-session-probe' in route.request.url else route.abort())
+    # Hold background polling so this assertion drives the first stale read. From the probe on,
+    # requests pass: aborting them while the 409 reloads the tab, or removing the route during
+    # that reload, made Chromium 151 crash the tab now and then ("Target crashed").
+    probe_sent = []
+
+    def hold_until_probe(route):
+        if probe_sent or 'stale-session-probe' in route.request.url:
+            probe_sent.append(True)
+            route.continue_()
+        else:
+            route.abort()
+    stale.route('**/bank/**', hold_until_probe)
     editor.locator('#appNavMine').click()
     editor.get_by_role('button', name='退出登录', exact=True).click()
     editor.locator('#loginForm').get_by_label('账号', exact=True).fill(users['viewer']['username'])
@@ -149,8 +159,8 @@ with sync_playwright() as p:
     with stale.expect_response(lambda r: '/bank/' in r.url and '/api/questions' in r.url and r.status == 409) as changed:
         stale.evaluate("void fetch('/api/questions?page=1&q=stale-session-probe')")
     assert changed.value.headers.get('x-mathbank-session-changed') == '1'
-    stale.unroute('**/bank/**')
     stale.wait_for_function("id=>window.MathBankPlatform?.id===id && document.documentElement.dataset.accountReady==='true'", arg=users['viewer']['id'])
+    stale.unroute('**/bank/**')
     assert stale.evaluate("localStorage.getItem('mathbank_local_drafts')") is None
     assert stale.evaluate('PaperStore.cart.length') == 0
     checks.append('stale tab rejects new-account reads and reloads into the current account')

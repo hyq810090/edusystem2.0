@@ -88,7 +88,14 @@ def screen(page, name):
 
 
 def wait_answer(page, count):
-    page.wait_for_function(f"document.querySelectorAll('.mb-dr-assistant:not(.mb-dr-waiting)').length >= {count}", timeout=60000)
+    try:
+        page.wait_for_function(f"document.querySelectorAll('.mb-dr-assistant:not(.mb-dr-waiting)').length >= {count}", timeout=60000)
+    except Exception:
+        # This wait once timed out only inside the full suite; keep what the page showed.
+        print('AI answers reaching the fake model:', len(fake.requests))
+        print('Chat:', page.evaluate("[...document.querySelectorAll('.mb-dr-message')].map(m => m.className + ': ' + m.innerText.slice(0, 200))"))
+        page.screenshot(path=str(ROOT/'test-results/drawing-ai-timeout.png'))
+        raise
 
 
 try:
