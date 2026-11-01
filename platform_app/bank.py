@@ -13,10 +13,13 @@ from platform_app.auth import actor, require_admin, space_access
 from platform_app.spaces import folder_reference, folder_subtree
 from platform_app.worker import ENV_KEYS
 
+from engine.mathbank.processing_limits import LIMITS
+
 router = APIRouter()
 # POST endpoints of the engine that only compute and never write.
 READ_POSTS = {'heartbeat', 'questions/check-duplicates', 'format/fractions'}
-MAX_BODY = 120 * 1024 * 1024
+
+MAX_BODY = max(120 * 1024 * 1024, LIMITS.document_upload_bytes + 1024 * 1024)
 
 
 @router.api_route('/static/uploads/{space_id}/{path:path}', methods=['GET', 'HEAD'])
@@ -82,7 +85,7 @@ async def bank(space_id: int, path: str, request: Request):
         return await platform_default_settings(workers, worker)
     body = await request.body()
     if len(body) > MAX_BODY:
-        raise HTTPException(413, '文件超过 120 MB 限制')
+        raise HTTPException(413, f'文件超过 {MAX_BODY // (1024 * 1024)} MB 限制')
     content_type = request.headers.get('content-type', '')
     folder_id = None
     if path == 'paper/save' and body:
@@ -129,7 +132,7 @@ def record_write(user, space_id, method, path, result, folder_id):
     with store.db() as c:
         if path == 'paper/save' and value.get('paper_id'):
             c.execute('INSERT OR REPLACE INTO paper_folders VALUES (?,?,?)', (space_id, value['paper_id'], folder_id))
-        elif path in {'upload/pdf-task', 'upload/docx-task'} and value.get('task_id'):
+        elif (path in {'upload/pdf-task', 'upload/docx-task'} or re.fullmatch(r'tasks/[^/]+/resume', path)) and value.get('task_id'):
             c.execute('INSERT INTO tasks VALUES (?,?,?)', (value['task_id'], space_id, user['id']))
         # Engine ids can be reused after deleting the newest row; drop stale links.
         elif method == 'DELETE' and re.fullmatch(r'papers/\d+', path):

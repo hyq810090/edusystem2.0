@@ -121,7 +121,7 @@ def turn(engine, body):
     payload = apply_model_thinking_policy({'model': provider.model_name, 'messages': build_messages(body), 'stream': False},
                                           provider=provider, task='draw')
     try:
-        response = engine.post_chat_completion(provider, payload, timeout=300, check_status=False)
+        response = engine.post_chat_completion(provider, payload, timeout=engine.AI_REQUEST_TIMEOUT_SECONDS, check_status=False)
         if response.status_code != 200:
             return JSONResponse({'detail': f'画图模型返回 HTTP {response.status_code}'}, status_code=502)
         body_json = response.json()

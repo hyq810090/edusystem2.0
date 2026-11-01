@@ -33,6 +33,11 @@ from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.orm import Session, selectinload
 from sqlalchemy import and_
 from dotenv import load_dotenv
+from mathbank.paths import ENV_FILE
+load_dotenv(ENV_FILE)
+from mathbank.processing_limits import LIMITS, public_processing_limits
+from mathbank.ai_timeouts import AI_REQUEST_TIMEOUT_SECONDS
+from mathbank.processing_timeouts import TIKZ_COMPILE_TIMEOUT_SECONDS
 
 from mathbank.database import (
     FIGURE_ALIGN_VALUES,
@@ -223,7 +228,6 @@ from mathbank.question_assets import (
 )
 
 # Load environment variables
-load_dotenv(ENV_FILE)
 harden_private_path(ENV_FILE)
 
 # The Windows launcher injects an unguessable UUID hex value and binds its
@@ -636,13 +640,13 @@ os.makedirs(TMP_UPLOAD_DIR, exist_ok=True)
 
 # Bounded document task manager shared by PDF and Word imports.
 DOCUMENT_TASKS = TaskManager(
-    max_workers=2,
-    max_queue=4,
+    max_workers=LIMITS.document_workers,
+    max_queue=LIMITS.document_queue,
     terminal_ttl_seconds=3600,
     temp_asset_cleanup=lambda paths: _delete_task_temp_assets(paths),
 )
-PDF_OCR_SEMAPHORE = threading.BoundedSemaphore(4)
-MAX_PDF_TASK_PAGES = 80
+PDF_OCR_SEMAPHORE = threading.BoundedSemaphore(LIMITS.pdf_ocr_workers)
+MAX_PDF_TASK_PAGES = LIMITS.pdf_pages
 
 def get_seq_mapping(db: Session, question_ids=None):
     """Map physical ID order to the user-facing contiguous sequence number."""
@@ -706,7 +710,7 @@ def read_index():
         html_content = html_content.replace('/static/favicon.png', f'/static/favicon.png?v={fav_mtime}')
             
         # Inject the token and server_instance_id directly into index.html to bypass any cookie blocking policies
-        token_script = f'<script>window.__localToken = "{LOCAL_TOKEN}"; window.__serverInstanceId = "{SERVER_INSTANCE_ID}"; window.__qaEnabled = {json.dumps(qa_enabled)};</script>'
+        token_script = f'<script>window.__localToken = "{LOCAL_TOKEN}"; window.__serverInstanceId = "{SERVER_INSTANCE_ID}"; window.__qaEnabled = {json.dumps(qa_enabled)}; window.__processingLimits = {json.dumps(public_processing_limits())};</script>'
         html_content = html_content.replace('<head>', f'<head>\n    {token_script}')
             
         res = HTMLResponse(content=html_content)
@@ -936,7 +940,7 @@ def ocr_via_provider(
         )
         return result["markdown"]
 
-    timeout = 240
+    timeout = AI_REQUEST_TIMEOUT_SECONDS
     # Chat-completion POSTs are not idempotent: a read timeout can happen after
     # the provider has accepted (and billed) the request.  Do not automatically
     # send the same image two or three times.  The shared transport still
@@ -996,7 +1000,7 @@ def extract_tikz_source(ai_message: str) -> str:
     raise RuntimeError("绘图模型未返回完整的 tikzpicture 源码。")
 
 
-def request_tikz_completion(provider, content_payload, *, timeout: int = 120) -> str:
+def request_tikz_completion(provider, content_payload, *, timeout: int = AI_REQUEST_TIMEOUT_SECONDS) -> str:
     """Send one TikZ model request with the shared reasoning and parser policy."""
 
     payload = {
@@ -1102,7 +1106,7 @@ def draw_tikz_via_high_model(
         return request_tikz_completion(
             provider,
             content_payload,
-            timeout=120,
+            timeout=AI_REQUEST_TIMEOUT_SECONDS,
         )
     except Exception as e:
         print(f"[High Model Draw Error] 大模型请求发生异常: {str(e)}")
@@ -1312,7 +1316,7 @@ def ai_solve(
                     response = post_chat_completion(
                         provider,
                         data,
-                        timeout=300,
+                        timeout=AI_REQUEST_TIMEOUT_SECONDS,
                         stream=True,
                         check_status=False,
                     )
@@ -1366,7 +1370,7 @@ def ai_solve(
                     yield f"data: {json.dumps({'status': 'done'}, ensure_ascii=False)}\n\n"
                 except requests.exceptions.Timeout:
                     friendly_msg = (
-                        f"AI 解析生成超时（限制为 300 秒）。这通常是因为 {provider_name} "
+                        f"AI 解析生成超时（限制为 {AI_REQUEST_TIMEOUT_SECONDS} 秒）。这通常是因为 {provider_name} "
                         f"服务端当前排队拥堵或推理速度过慢。建议您稍后再试，或在设置中切换为「DeepSeek 官方」或「阿里百炼」等更稳定的接口平台。"
                     )
                     yield f"data: {json.dumps({'status': 'error', 'message': friendly_msg}, ensure_ascii=False)}\n\n"
@@ -1375,11 +1379,11 @@ def ai_solve(
             
             return StreamingResponse(event_generator(), media_type="text/event-stream")
 
-        # Generous 300 seconds timeout (5 minutes) for high-school math reasoning and network proxies
+        # Use the shared AI transport budget; cancellation/retry rules remain independent.
         response = post_chat_completion(
             provider,
             data,
-            timeout=300,
+            timeout=AI_REQUEST_TIMEOUT_SECONDS,
             provider_name=provider_name,
         )
             
@@ -1406,7 +1410,7 @@ def ai_solve(
         }
     except requests.exceptions.Timeout:
         friendly_msg = (
-            f"AI 解析生成超时（限制为 300 秒）。这通常是因为 {provider_name} "
+            f"AI 解析生成超时（限制为 {AI_REQUEST_TIMEOUT_SECONDS} 秒）。这通常是因为 {provider_name} "
             f"服务端当前排队拥堵或推理速度过慢。建议您稍后再试，或在设置中切换为「DeepSeek 官方」或「阿里百炼」等更稳定的接口平台。"
         )
         return JSONResponse(
@@ -1870,7 +1874,7 @@ def compile_tikz_to_png(tikz_code: str) -> str:
             cwd=temp_dir,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
-            timeout=15,
+            timeout=TIKZ_COMPILE_TIMEOUT_SECONDS,
             env=build_restricted_tex_environment(temp_dir),
         )
 
@@ -2055,7 +2059,7 @@ def correct_tikz_endpoint(
         corrected_code = request_tikz_completion(
             draw_provider,
             content_payload,
-            timeout=90,
+            timeout=AI_REQUEST_TIMEOUT_SECONDS,
         )
         return {
             "status": "success",
@@ -4194,7 +4198,7 @@ def ai_classify(content: str = Form(...)):
         response = post_chat_completion(
             provider,
             data,
-            timeout=30,
+            timeout=AI_REQUEST_TIMEOUT_SECONDS,
             provider_name=provider_name,
         )
             
@@ -5134,224 +5138,309 @@ def find_source_page_by_overlap(q_text: str, ocr_results: list) -> int:
             
     return best_page
 
+def paper_selection_annotations(db, questions):
+    """Native default; platform replaces this with its existing per-space point table."""
+    for question in questions:
+        question.knowledge_points = []
+    return questions
+
+
+@app.get("/api/paper/reference-exams")
+def paper_reference_exams(db: Session = Depends(get_db)):
+    from mathbank.paper_selection import list_reference_exams
+    if subject_profile.subject() != "数学" or subject_profile.stage() != "高中":
+        return {"status": "success", "data": []}
+    return {"status": "success", "data": list_reference_exams(db)}
+
+
 @app.post("/api/paper/ai-select")
 def ai_select_paper(payload: dict, db: Session = Depends(get_db)):
-    """AI 智能选题：结合用户指定的 PREFER_SOLVE_MODEL 大模型与 math-teaching 教研引擎组卷"""
+    """Plan a filtered paper with one screen and at most one full-reading call."""
+    from mathbank.paper_selection import (
+        parse_selection_request, build_reference_context, collect_candidates,
+        select_local_candidates,
+    )
+    from mathbank.paper_selection_ai import (
+        candidate_prompt_items, parse_selection_response, checked_selection, selection_summary,
+        candidate_revision, review_shortlist, prepare_full_review, changed_review_image_ids,
+        MAX_REVIEW_CANDIDATES,
+    )
+    from mathbank.paper_standards import build_paper_standard_context
+    from mathbank.paper_standard_alignment import validate_standard_alignment, standard_analysis_text
+
     require_expected_curriculum_version(payload.get("expected_version_code"))
     try:
+        request = parse_selection_request(payload)
         prompt = payload.get("prompt", "").strip()
-        question_type = payload.get("question_type", "")
-        difficulty = payload.get("difficulty", "")
-        compulsory = payload.get("compulsory", "")
-        chapter = payload.get("chapter", "")
-        knowledge = payload.get("knowledge", "")
+        if not request["question_type"]:
+            request["question_type"] = subject_profile.infer_type(prompt, METADATA_CACHE) or ""
+        # Mentions of a topic within a whole-paper blueprint ("其中3题导数")
+        # describe coverage, rather than restricting every candidate to it.
+        if subject_profile.subject() != "数学":
+            request["topics"] = [topic for topic in subject_profile.topics([]) if topic in prompt]
+        scope_topics = [] if re.search(r"整卷|全卷|高考卷|仿真卷|其中", prompt) else request["topics"]
+        for field in ("compulsory", "chapter", "knowledge", "difficulty", "keyword", "question_type"):
+            if not isinstance(payload.get(field, ""), str):
+                raise ValueError("组卷筛选条件须为文字。")
+        reference_mode = payload.get("reference_mode", "recent_gaokao")
+        if reference_mode not in {"recent_gaokao", "none"}:
+            raise ValueError("请选择近年高考参考或不使用参考。")
+        query = db.query(Question).options(
+            selectinload(Question.curriculum_mappings).selectinload(QuestionCurriculum.sub_knowledge_rows),
+        )
+        if request["question_type"]:
+            query = query.filter(Question.question_type == request["question_type"])
+        elif request["question_types"]:
+            query = query.filter(Question.question_type.in_(request["question_types"]))
+        if request.get("excluded_question_types"):
+            query = query.filter(~Question.question_type.in_(request["excluded_question_types"]))
+        if payload.get("difficulty"):
+            query = query.filter(Question.difficulty == payload["difficulty"])
         raw_include_sub = payload.get("include_sub_knowledge", False)
         include_sub = raw_include_sub is True or str(raw_include_sub).lower() in {"true", "1"}
-        try:
-            sub_paths = normalize_sub_knowledge(payload.get("sub_knowledge", []))
-        except (ValueError, TypeError) as exc:
-            raise HTTPException(status_code=400, detail=str(exc)) from exc
-        limit = max(1, min(int(payload.get("limit", 5)), 20))
-
-        # 0. 自然语言意图智能分析 (NL Intent Parser)
-        extracted_topics = []
-        is_review_intent = False
-        if prompt:
-            is_review_intent = any(k in prompt for k in ['做过', '考过', '已抽过', '已用过', '复习', '旧题', '重做', '错题', '以往', '历史'])
-            num_match = re.search(r'([一二三四五六七八九十1-9]+)\s*道', prompt)
-            cn_to_num = {'一':1, '两':2, '二':2, '三':3, '四':4, '五':5, '六':6, '七':7, '八':8, '九':9, '十':10}
-            if num_match:
-                val = num_match.group(1)
-                limit = cn_to_num.get(val, int(val) if val.isdigit() else limit)
-
-            if not question_type:
-                question_type = subject_profile.infer_type(prompt, METADATA_CACHE)
-            if not question_type:
-                if '填空' in prompt: question_type = 'fill_in_blank'
-                elif '单选' in prompt: question_type = 'single_choice'
-                elif '多选' in prompt: question_type = 'multi_choice'
-                elif '解答' in prompt: question_type = 'detailed_answer'
-
-            known_topics = ['立体几何', '集合', '函数', '导数', '数列', '三角函数', '平面向量', '概率', '解析几何', '圆锥曲线', '复数', '不等式', '排列组合']
-            extracted_topics = [t for t in subject_profile.topics(known_topics) if t in prompt]
-
-        # 1. 结构化过滤基础题目池
-        query = db.query(Question).options(
-            selectinload(Question.curriculum_mappings).selectinload(QuestionCurriculum.sub_knowledge_rows)
-        )
-        if question_type:
-            query = query.filter(Question.question_type == question_type)
-        if difficulty:
-            query = query.filter(Question.difficulty == difficulty)
+        sub_paths = normalize_sub_knowledge(payload.get("sub_knowledge", []))
         query = apply_curriculum_filters(
-            query, compulsory, chapter, knowledge, include_sub_knowledge=include_sub,
-            sub_knowledge=sub_paths, sub_knowledge_mode=payload.get("sub_knowledge_mode", "any"),
+            query, payload.get("compulsory", ""), payload.get("chapter", ""), payload.get("knowledge", ""),
+            include_sub_knowledge=include_sub, sub_knowledge=sub_paths,
+            sub_knowledge_mode=payload.get("sub_knowledge_mode", "any"),
         )
-            
-        if is_review_intent:
-            # 复习/旧题模式：优先提取已使用频次高的题目
-            review_query = query.filter(Question.usage_count > 0).order_by(Question.usage_count.desc(), Question.id.desc())
-            candidates = review_query.limit(35).all()
-            if not candidates:
-                candidates = query.order_by(Question.id.desc()).limit(35).all()
-        else:
-            # 默认鲜活模式：优先提取从未被使用过的冷门题目
-            candidates = query.order_by(Question.usage_count.asc(), Question.id.desc()).limit(35).all()
-            if not candidates and not any((question_type, difficulty, compulsory, chapter, knowledge, sub_paths)):
-                candidates = db.query(Question).order_by(Question.usage_count.asc(), Question.id.desc()).limit(35).all()
-
-        # 2. 解题、拆卷、分类和组卷共用同一供应商解析规则。
-        # 不会因为某家 Key 缺失而静默改用另一家。
-        target_model = (
-            os.getenv("PREFER_SOLVE_MODEL")
-            or os.getenv("PREFER_PARSE_MODEL")
-            or "deepseek-flash"
+        query = apply_knowledge_point_filters(
+            query, payload.get("knowledge_point_codes") or [],
+            match_mode=payload.get("knowledge_point_mode", "any"),
+            role_scope=payload.get("knowledge_point_role", "main"),
+            unlabeled=payload.get("knowledge_point_unlabeled", False),
         )
-        provider = resolve_text_provider(target_model)
-        api_key = provider.api_key
-        api_base = provider.api_base
-        model_name = provider.model_name
-        provider_name = provider.provider_label
-
-        api_error_detail = None
-        if prompt and candidates:
-            if not api_key or not api_base:
-                api_error_detail = (
-                    f"指定的 AI 解题模型 ({target_model}) 未配置有效的 "
-                    f"API Key 或 Base URL（{provider.credential_label}）。"
-                )
-            else:
-                candidate_items = []
-                for q in candidates:
-                    clean_stem = re.sub(r'[\r\n]+', ' ', q.content[:80])
-                    candidate_items.append({
-                        "id": q.id,
-                        "question_type": q.question_type,
-                        "difficulty": q.difficulty,
-                        "usage_count": q.usage_count or 0,
-                        "knowledge": q.category_knowledge or "整章定位（待细分）",
-                        "tags": q.tags or "",
-                        "stem_excerpt": clean_stem
-                    })
-
-                system_prompt, user_content = build_paper_selection_prompts(
-                    teacher_prompt=prompt,
-                    limit=limit,
-                    candidates=candidate_items,
-                    is_review_intent=is_review_intent,
-                )
-
-                try:
-                    payload_data = {
-                        "model": model_name,
-                        "messages": [
-                            {"role": "system", "content": system_prompt},
-                            {"role": "user", "content": user_content}
-                        ],
-                        "temperature": 0.3
-                    }
-                    payload_data = apply_model_thinking_policy(
-                        payload_data,
-                        provider=provider,
-                        task="paper_selection",
-                    )
-                    response = post_chat_completion(
-                        provider,
-                        payload_data,
-                        timeout=20,
-                        provider_name=provider_name,
-                    )
-                    res_json = response.json()
-                    raw_content = res_json.get("choices", [{}])[0].get("message", {}).get("content", "").strip()
-                    if raw_content.startswith("```"):
-                        raw_content = re.sub(r"^```(?:json)?\s*", "", raw_content)
-                        raw_content = re.sub(r"\s*```$", "", raw_content)
-
-                    parsed = json.loads(raw_content)
-                    raw_selected_ids = parsed.get("selected_ids", [])
-                    ai_analysis = parsed.get("ai_analysis", "")
-
-                    if raw_selected_ids and isinstance(raw_selected_ids, list):
-                        # The model may only rank the candidate IDs that were
-                        # actually supplied after local filters.  This prevents
-                        # prompt output from bypassing chapter/type constraints
-                        # or selecting arbitrary records from the database.
-                        allowed_ids = {question.id for question in candidates}
-                        selected_ids = []
-                        seen_ids = set()
-                        for raw_id in raw_selected_ids:
-                            try:
-                                selected_id = int(raw_id)
-                            except (TypeError, ValueError):
-                                continue
-                            if (
-                                selected_id in allowed_ids
-                                and selected_id not in seen_ids
-                            ):
-                                selected_ids.append(selected_id)
-                                seen_ids.add(selected_id)
-                            if len(selected_ids) >= limit:
-                                break
-                        db_selected = db.query(Question).filter(Question.id.in_(selected_ids)).all()
-                        id_map = {q.id: q for q in db_selected}
-                        seq_map = get_seq_mapping(db, selected_ids)
-                        final_questions = [{**id_map[qid].to_dict(get_active_version_code()), "seq_num": seq_map.get(qid)} for qid in selected_ids if qid in id_map]
-
-                        if final_questions:
-                            return {
-                                "status": "success",
-                                "data": final_questions,
-                                "count": len(final_questions),
-                                "ai_analysis": ai_analysis,
-                                "model_used": f"{provider_name} ({model_name})",
-                                "fallback": False
-                            }
-                except Exception as llm_err:
-                    api_error_detail = f"{provider_name} API 请求失败: {str(llm_err)}"
-
-        # 3. 降级本地算法（带明确错误反馈）
-        fallback_questions = []
-        if extracted_topics:
-            for topic in extracted_topics:
-                sub_query = query
-                sub_query = sub_query.filter(
-                    (Question.content.like(f"%{topic}%")) |
-                    (Question.category_chapter.like(f"%{topic}%")) |
-                    (Question.category_knowledge.like(f"%{topic}%")) |
-                    (Question.tags.like(f"%{topic}%"))
-                )
-                order_clause = Question.usage_count.desc() if is_review_intent else Question.usage_count.asc()
-                for q in sub_query.order_by(order_clause, Question.id.desc()).all():
-                    if q not in fallback_questions:
-                        fallback_questions.append(q)
-
-        # 补足数量
-        if len(fallback_questions) < limit:
-            for q in candidates:
-                if q not in fallback_questions:
-                    fallback_questions.append(q)
-                if len(fallback_questions) >= limit:
-                    break
-
-        selected_fallback = fallback_questions[:limit]
-        seq_map = get_seq_mapping(db, [q.id for q in selected_fallback])
-        result = [{**q.to_dict(get_active_version_code()), "seq_num": seq_map.get(q.id)} for q in selected_fallback]
-        
-        topic_str = "、".join(extracted_topics) if extracted_topics else "通用知识点"
-        err_banner = f"⚠️ 【AI 解题模型调用未成功】: {api_error_detail}\n系统已为您自动启动本地教研算法，根据意图（{topic_str}）在本地题库中筛选并组合了 {len(result)} 道精选题目。" if api_error_detail else f"【本地智能筛选分析】已为您自动识别意图（{topic_str}），从题库中精准挑选并组合了鲜活试题。"
-        
-        return {
-            "status": "success",
-            "data": result,
-            "count": len(result),
-            "ai_analysis": err_banner,
-            "model_used": f"⚠️ 模型调用失败 ({target_model}) ➔ 退回本地算法" if api_error_detail else "本地算法",
-            "fallback": True
-        }
+        keyword = payload.get("keyword", "")
+        if keyword:
+            from sqlalchemy import or_
+            query = query.filter(or_(*(column.contains(keyword, autoescape=True) for column in
+                (Question.content, Question.answer_markdown, Question.source, Question.tags))))
+        senior_math = subject_profile.subject() == "数学" and subject_profile.stage() == "高中"
+        reference = (build_reference_context(db, "none" if reference_mode == "none" else payload.get("reference_key"))
+                     if senior_math else {"enabled": False, "references": [], "warnings": []})
+        warnings = list(reference["warnings"])
+        counts = request["type_counts"] or None
+        # A full-paper request may adopt an observed complete blueprint. A
+        # scoped exercise never inherits whole-paper proportions automatically.
+        if (not counts and not request["question_type"] and not request["question_types"]
+                and not scope_topics and re.search(r"整卷|全卷|高考卷|仿真卷", prompt)):
+            full = next((item for item in reference["references"]
+                         if item["complete"] and item["question_count"] == request["limit"]), None)
+            if full:
+                counts = full["type_counts"]
+        candidates = collect_candidates(
+            query, limit=request["limit"], excluded_ids=request["excluded_ids"],
+            topics=scope_topics, review=request["review"], type_counts=counts,
+        )
+        # Pure local matching. Freeze once and share with both existing model
+        # stages, including source IDs/pages and explicit teacher boundaries.
+        candidates = paper_selection_annotations(db, candidates)
+        standard_context = (build_paper_standard_context(prompt, filters=payload, candidates=candidates)
+                            if senior_math else {"enabled": False, "warnings": [], "references": []})
+        warnings.extend(standard_context.get("warnings", []))
     except HTTPException:
         raise
-    except Exception as e:
-        return JSONResponse(content={"status": "error", "message": f"AI 智能选题失败: {str(e)}"}, status_code=500)
+    except (ValueError, TypeError) as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    target_model = os.getenv("PREFER_SOLVE_MODEL") or os.getenv("PREFER_PARSE_MODEL") or "deepseek-flash"
+    provider = resolve_text_provider(target_model)
+    selected, ai_analysis, engine_name = [], "", "local"
+    model_label = "本地筛选"
+    revisions = {q.id: candidate_revision(q) for q in candidates}
+    model_attempted = False
+    reading = {"model_calls": 0, "stages": [], "review_required": False, "review": {}}
+    reviewed_ids, image_fingerprints = set(), []
+    ai_selected_ids = set()
+    raw_standard_alignment = None
+    status_scope = payload.get("knowledge_point_status", "all")
+    selection_plan = {"requested_count": request["limit"], "type_counts": counts or {},
+                      "filters": {key: value for key, value in payload.items()
+                                  if key not in {"prompt", "exclude_ids", "reference_key"}},
+                      "excluded_count": len(request["excluded_ids"])}
+
+    def refresh_candidates():
+        db.expire_all()
+        refreshed = paper_selection_annotations(db, query.filter(Question.id.in_(list(revisions))).populate_existing().all())
+        current = {q.id: q for q in refreshed if candidate_revision(q) == revisions[q.id]}
+        if len(current) != len(candidates):
+            warnings.append("等待期间部分候选已修改、删除或不再符合筛选，已从本次结果移除。")
+        return [current[qid] for qid in revisions if qid in current]
+
+    def ask_model(items, *, phase, requested_count, image_parts=None):
+        stage = {"phase": phase, "candidate_count": len(items), "status": "started"}
+        reading["stages"].append(stage)
+        system_prompt, user_content = build_paper_selection_prompts(
+            teacher_prompt=prompt, limit=requested_count, candidates=items,
+            is_review_intent=request["review"], reference_context=reference,
+            selection_plan={**selection_plan, "phase": phase, "shortlist_limit": requested_count},
+            standard_context=standard_context,
+        )
+        message_content = ([{"type": "text", "text": user_content}, *image_parts]
+                           if image_parts else user_content)
+        stage["payload_text_chars"] = len(system_prompt) + len(user_content) + sum(
+            len(part.get("text", "")) for part in (image_parts or []) if part.get("type") == "text")
+        model_payload = apply_model_thinking_policy({
+            "model": provider.model_name,
+            "messages": [{"role": "system", "content": system_prompt},
+                         {"role": "user", "content": message_content}],
+            "temperature": 0.3,
+        }, provider=provider, task="paper_selection")
+        model_payload = apply_structured_output_policy(model_payload, provider=provider)
+        try:
+            reading["model_calls"] += 1
+            response = post_chat_completion(provider, model_payload,
+                timeout=AI_REQUEST_TIMEOUT_SECONDS, provider_name=provider.provider_label)
+            result = parse_selection_response(response.json())
+            stage["status"] = "completed"
+            return result
+        except Exception:
+            stage["status"] = "failed"
+            raise
+
+    if candidates and prompt:
+        if not provider.api_key or not provider.api_base:
+            warnings.append("所选解题模型未配置可用凭据，本次使用本地筛选。")
+        else:
+            try:
+                model_attempted = True
+                screening = candidate_prompt_items(candidates, status_scope=status_scope)
+                shortlist_limit = min(MAX_REVIEW_CANDIDATES, max(request["limit"] + 4, request["limit"] * 2))
+                parsed = ask_model(screening, phase="shortlist", requested_count=shortlist_limit)
+                candidates = refresh_candidates()
+                local_order = select_local_candidates(candidates, len(candidates), topics=request["topics"],
+                    review=request["review"])
+                shortlist = review_shortlist(candidates, parsed["selected_ids"], limit=request["limit"],
+                    local_order=local_order, type_counts=counts)
+                shortlist_ids = {q.id for q in shortlist}
+                reading["review_required"] = any(item["id"] in shortlist_ids
+                    and (item["stem_truncated"] or item["has_image_reference"]) for item in screening)
+                if reading["review_required"]:
+                    full_items, image_parts, image_fingerprints, reading["review"] = prepare_full_review(
+                        shortlist, provider, status_scope=status_scope)
+                    eligible = {item["id"] for item in full_items if item["eligible_for_ai_final"]}
+                    if reading["review"]["withheld"]:
+                        warnings.append("部分入围题的完整题干超过复读预算，未截断冒充全文；只能作为未复核的本地备选。")
+                    if reading["review"]["image_unavailable_ids"]:
+                        warnings.append("部分入围题的必要图像像素未提供（型号未确认识图、缺图或安全预算限制）；不能采用其初筛AI结论，只能作本地未复核备选。")
+                    if not eligible:
+                        raise ValueError("入围题没有可完整复读的候选。")
+                    parsed = ask_model(full_items, phase="full_review", requested_count=request["limit"],
+                        image_parts=image_parts)
+                    reviewed_ids = eligible
+                    ai_candidates = [q for q in shortlist if q.id in eligible]
+                else:
+                    ai_candidates = candidates
+                    reviewed_ids = {item["id"] for item in screening if not item["stem_truncated"]
+                                    and not item["has_image_reference"]}
+                selected, rejected = checked_selection(ai_candidates, parsed["selected_ids"],
+                    limit=request["limit"], type_counts=counts)
+                if not selected:
+                    raise ValueError("模型未返回候选池中的可用题目。")
+                ai_analysis = "AI选题建议（供教师审阅）：\n" + parsed.get("ai_analysis", "")[:12000]
+                engine_name = "ai"
+                model_label = f"{provider.provider_label} ({provider.model_name})"
+                ai_selected_ids = {q.id for q in selected}
+                raw_standard_alignment = parsed.get("standards_alignment")
+                if rejected:
+                    warnings.append("已剔除模型返回的无效、重复或不符合题型配额的编号。")
+            except Exception:
+                # Do not expose provider exceptions/credentials or retry an
+                # unknown physical request. Local fallback requires no network.
+                selected, ai_selected_ids, reviewed_ids, ai_analysis = [], set(), set(), ""
+                raw_standard_alignment = None
+                warnings.append("AI调用失败、结果未通过校验或没有可完整复读的候选，本次使用本地筛选，未自动重发模型请求；未沿用未复读长题或缺图题的初筛结论。")
+    if model_attempted:
+        # Re-read only the supplied candidate IDs after the model wait. Deleted
+        # or edited questions must not silently inherit the model's old verdict.
+        selected_ids_before_refresh = [q.id for q in selected]
+        candidates = refresh_candidates()
+        changed_images = changed_review_image_ids(image_fingerprints)
+        if changed_images:
+            warnings.append("等待期间部分已提供的题图字节发生变化，已排除这些候选及其旧AI判断。")
+            candidates = [q for q in candidates if q.id not in changed_images]
+        current = {q.id: q for q in candidates}
+        selected = [current[qid] for qid in selected_ids_before_refresh if qid in current]
+        if not selected:
+            engine_name = "local"
+            model_label = "本地筛选"
+    local = select_local_candidates(candidates, len(candidates), topics=request["topics"],
+                                    review=request["review"], type_counts=counts)
+    if len(selected) < request["limit"]:
+        initial_count = len(selected)
+        selected, _ = checked_selection(candidates, [q.id for q in selected] + [q.id for q in local],
+                                        limit=request["limit"], type_counts=counts)
+        if engine_name == "ai" and len(selected) > initial_count:
+            engine_name = "ai_with_local_completion"
+            warnings.append(f"模型仅给出{initial_count}道有效题，已在同一候选池内用本地规则补入{len(selected)-initial_count}道，请核对组合。")
+    summary = selection_summary(selected, requested=request["limit"], candidate_count=len(candidates), type_counts=counts)
+    if summary["shortfall"]:
+        warnings.append(f"当前筛选与去重后仅选出{len(selected)}道，距目标缺{summary['shortfall']}道；未扩大筛选范围。")
+    if counts:
+        missing = {kind: count - summary["type_counts"].get(kind, 0)
+                   for kind, count in counts.items() if count > summary["type_counts"].get(kind, 0)}
+        summary["type_shortfalls"] = missing
+    if engine_name == "local":
+        ai_analysis = "本地筛选按已识别主题、主考点覆盖和使用记录排序；尚未评估全部自然语言要求、设问梯度或参考卷风格，请教师核对。"
+    review_items = {item["id"]: item for item in reading["review"].get("items", [])}
+    withheld_text = {item["id"]: item["reason"] for item in reading["review"].get("withheld", [])}
+    reading["selected"] = [{"id": q.id,
+        "basis": (("ai_full_review" if reading["review_required"] else "ai_screening_full_text")
+                  if q.id in ai_selected_ids and q.id in reviewed_ids else "local_unreviewed"),
+        "text_complete": q.id in reviewed_ids and q.id in ai_selected_ids,
+        "image_complete": q.id in reviewed_ids and q.id in ai_selected_ids,
+        "text_provided_complete": (review_items[q.id]["text_provided_complete"] if q.id in review_items
+                                   else model_attempted and not reading["review_required"] and not item["stem_truncated"]),
+        "image_provided_complete": (review_items[q.id]["image_provided_complete"] if q.id in review_items
+                                    else not item["has_image_reference"]),
+        "unavailable_images": review_items.get(q.id, {}).get("unavailable_images", []),
+        "text_unavailable_reason": withheld_text.get(q.id, ""),
+        "image_state": ("not_needed" if not item["has_image_reference"] else
+                        "provided_complete" if q.id in reviewed_ids and q.id in ai_selected_ids
+                        else "not_provided_or_not_reviewed"),
+        "needs_image": item["has_image_reference"]}
+        for q, item in zip(selected, candidate_prompt_items(selected, status_scope=status_scope))]
+    local_unreviewed = sum(item["basis"] == "local_unreviewed" for item in reading["selected"])
+    if local_unreviewed:
+        warnings.append(f"最终{local_unreviewed}道由本地规则补选，未获得本次AI完整阅读结论，请教师核对全部小问与图形。")
+    sequence = get_seq_mapping(db, [q.id for q in selected])
+    standards_alignment, standard_warnings = validate_standard_alignment(
+        raw_standard_alignment, selected=selected, ai_question_ids=ai_selected_ids & reviewed_ids,
+        context=standard_context,
+    )
+    warnings.extend(standard_warnings)
+    sources = "、".join(item["title"] for item in reference["references"])
+    if sources:
+        ai_analysis += "\n参考来源（库内标注）：" + sources
+    ai_analysis += f"\n实际选出{summary['selected']}/{summary['requested']}道，候选池{summary['candidate_count']}道。"
+    ai_analysis += "\n\n" + standard_analysis_text(standard_context, standards_alignment,
+                                                 local_unreviewed=local_unreviewed, question_numbers=sequence)
+    stage_names = {"shortlist": "初筛", "full_review": "整题复读"}
+    stage_status = {"completed": "完成", "failed": "失败（未自动重发）", "started": "结果未确认"}
+    stages_text = "；".join(stage_names[stage["phase"]] + stage_status[stage["status"]]
+                            for stage in reading["stages"]) or "未调用模型"
+    ai_analysis += f"\n实际模型请求{reading['model_calls']}次：{stages_text}。本地未复核补选{local_unreviewed}道。"
+    for item in reading["selected"]:
+        basis = {"ai_full_review": "AI整题复读后选定", "ai_screening_full_text": "初筛已提供完整短题", "local_unreviewed": "本地规则，未采信AI完整阅读结论"}[item["basis"]]
+        image_state = {"not_needed": "无必要题图", "provided_complete": "必要题图像素已完整提供", "not_provided_or_not_reviewed": "题图未提供或未获完整复读结论"}[item["image_state"]]
+        ai_analysis += f"\n题库ID {item['id']}：{basis}；{image_state}。"
+        missing_reasons = {"model_images_unsupported": "当前型号未确认识图", "image_count_budget": "图像数量预算不足",
+            "image_single_byte_budget": "单图文件超过复读体积预算", "image_pixels_format_or_encoding": "图像像素、格式或转码体积未通过安全校验",
+            "image_byte_budget": "图像体积预算不足", "unsafe_missing_or_invalid_image": "图片不安全、缺失或格式无效",
+            "tikz_pixels_unavailable": "TikZ只有源码，未提供渲染像素", "image_reference_missing": "题干提及图形但未找到可提供的题图",
+            "incomplete_figure_set": "同题部分图像不可用，整题图像未发送"}
+        reasons = list(dict.fromkeys(missing_reasons[image["reason"]] for image in item["unavailable_images"]))
+        if item["text_unavailable_reason"]:
+            reasons.append(item["text_unavailable_reason"])
+        if reasons:
+            ai_analysis += "未完整复读原因：" + "、".join(reasons) + "。"
+    return {"status": "success", "data": [{**q.to_dict(get_active_version_code()), "seq_num": sequence.get(q.id)} for q in selected],
+            "count": len(selected), "ai_analysis": ai_analysis, "model_used": model_label,
+            "fallback": engine_name == "local", "selection_engine": engine_name,
+            "warnings": list(dict.fromkeys(warnings)), "selection_summary": summary,
+            "selection_reading": reading,
+            "standard_context": standard_context, "standards_alignment": standards_alignment,
+            "reference_profile": reference}
 
 
 def post_process_pdf_parsed_questions(parsed_questions: list, paper_title: str, task_id: str = None, ocr_results: list = None, *, source_body_preserved: bool = False, preserved_indices=None) -> list:
@@ -5876,7 +5965,7 @@ def run_pdf_parsing_task(
                         PDF_OCR_SEMAPHORE.release()
 
             executor = concurrent.futures.ThreadPoolExecutor(
-                max_workers=min(len(pages_requiring_ocr), 4),
+                max_workers=min(len(pages_requiring_ocr), LIMITS.pdf_ocr_workers),
                 thread_name_prefix="mathbank-pdf-ocr",
             )
             futures = []
@@ -6254,7 +6343,7 @@ def upload_pdf_task(
             content = read_stream_limited(file.file, MAX_PDF_BYTES)
         except UploadTooLargeError:
             return JSONResponse(
-                content={"status": "error", "message": "PDF 文件过大，请上传 30MB 以内的试卷文件！"},
+                content={"status": "error", "message": f"PDF 文件过大，请上传 {MAX_PDF_BYTES // (1024 * 1024)}MB 以内的试卷文件！"},
                 status_code=413
             )
         if not content.lstrip().startswith(b"%PDF-"):
@@ -6644,7 +6733,7 @@ def upload_docx_task(
             content = read_stream_limited(file.file, MAX_PDF_BYTES)
         except UploadTooLargeError:
             return JSONResponse(
-                content={"status": "error", "message": "Word 文件过大，请上传 30MB 以内的试卷文件！"},
+                content={"status": "error", "message": f"Word 文件过大，请上传 {MAX_PDF_BYTES // (1024 * 1024)}MB 以内的试卷文件！"},
                 status_code=413
             )
         if len(content) < 4 or content[:4] != b"PK\x03\x04":
@@ -7191,7 +7280,7 @@ def explain_latex_compile_error(log_text: str, tex_content: str) -> dict:
         response = post_chat_completion(
             provider,
             payload,
-            timeout=45,
+            timeout=AI_REQUEST_TIMEOUT_SECONDS,
             provider_name=provider.provider_label,
         )
         raw_text = response.json()["choices"][0]["message"]["content"].strip()

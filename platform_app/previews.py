@@ -12,13 +12,15 @@ from pathlib import Path
 from fastapi import APIRouter, File, HTTPException, Request, UploadFile
 from fastapi.responses import FileResponse
 
+from engine.mathbank.processing_limits import LIMITS
+from engine.mathbank.processing_timeouts import SOURCE_RENDER_TIMEOUT_SECONDS
 from platform_app import store
 from platform_app.auth import actor, space_access
 
 router = APIRouter(prefix='/platform/api/spaces/{space_id}/source-preview')
-MAX_BYTES = 60 * 1024 * 1024
+MAX_BYTES = LIMITS.document_upload_bytes
 KEEP_SECONDS = 3 * 86400
-TIMEOUT = 120
+TIMEOUT = SOURCE_RENDER_TIMEOUT_SECONDS
 lock = asyncio.Lock()  # one LibreOffice conversion at a time
 
 
@@ -51,7 +53,7 @@ async def preview(space_id: int, request: Request, file: UploadFile = File(...))
         raise HTTPException(400, '只有 Word（.docx）需要生成预览')
     data = await file.read(MAX_BYTES + 1)
     if len(data) > MAX_BYTES or not data.startswith(b'PK'):
-        raise HTTPException(400, 'Word 文件无效或超过 60 MB')
+        raise HTTPException(400, f'Word 文件无效或超过 {MAX_BYTES // (1024 * 1024)} MB')
     program = renderer()
     if not program:
         raise HTTPException(503, '服务器未安装 LibreOffice，暂时无法预览 Word 原卷')

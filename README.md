@@ -20,6 +20,47 @@
 
 `engine/main.py`、五个主要前端脚本、HTML、CSS、所有导入领域模块从原项目直接复制。原始 SHA-256 清单见 `upstream-manifest.json`。在三个 Windows 兼容修正之外，现已合入 PhysicsBank 的学科规则，增加按学科和学段配置的提示词、物理条件检查、题型和试卷适配。修改范围及哈希记录在 `platform-adaptations.json`，原始两个项目均未改动。
 
+## 上游安全与处理策略更新（2026-11-01）
+
+从 [MathBank `fc3c213`](https://github.com/JudgePeach/math-question-bank/commit/fc3c213c5378cf4302857f419464d27e38927e9a) 选择移植图片安全、统一处理容量/等待策略与 PDF 缺字诊断，保留账号/空间、物理、知识点及独立题图排版适配，不升级原生题库 schema。
+
+- Python 3.11+ 使用 Pillow 13.0.0；损坏 EXIF 转为无效图片提示。
+- PDF 不再把“编译成功但字体缺字”的文件当成完整导出；正文中的 △、∠ 在导出副本使用数学字体，数据库原文保持原样。错误位置只采用编译证据，不能确定时提示人工核对。
+- 普通 AI 请求默认 900 秒，文档识别/拆题默认 1800 秒；可由 `MATHBANK_AI_REQUEST_TIMEOUT_SECONDS`、`MATHBANK_DOCUMENT_AI_TIMEOUT_SECONDS` 设置为 60–7200 秒。平台代理等待时间随之调整；不增加重试次数。
+- 容量由进程启动时的环境变量配置，变更需重启。默认图片 10 MiB/3000 万像素、文档 30 MiB、文本 5 MiB、PDF 80 页、每空间文档并发 2/排队 4、页面识别并发 4。
+
+| 环境变量 | 范围 |
+| --- | --- |
+| `MATHBANK_MAX_IMAGE_MIB` / `MATHBANK_MAX_NORMALIZED_IMAGE_MIB` | 1–64 MiB |
+| `MATHBANK_MAX_IMAGE_MEGAPIXELS` | 1–120 百万像素 |
+| `MATHBANK_MAX_DOCUMENT_MIB` | 1–256 MiB |
+| `MATHBANK_MAX_TEXT_SOURCE_MIB` | 1–32 MiB |
+| `MATHBANK_MAX_PDF_PAGES` | 1–500 页 |
+| `MATHBANK_DOCUMENT_WORKERS` / `MATHBANK_DOCUMENT_QUEUE` | 1–4 / 0–64 |
+| `PDF_OCR_CONCURRENCY` | 1–12 |
+
+这些并发上限按空间 worker 计算，整机仍受 `MATHBANK_MAX_WORKERS` 与容器 CPU/内存限制。低内存机器宜降低并发；放宽文件/页数上限不代表服务器能同时处理相应规模。依赖变更必须重新构建根目录 Dockerfile 的 `mathbank:base`，再更新代码镜像；仅运行 `deploy/Dockerfile` 不会升级 Pillow。更新前保留 `mathbank:previous` 及本项目数据备份。
+
+## PDF 恢复、AI 选题与只读接口（2026-11-01）
+
+- PDF 中断后可恢复未完成步骤。源 PDF 在当前空间 worker 中临时保留一小时、最多 64 份，复用经过重验的逐页识别缓存；整卷拆题不缓存。同页安全边界内的题稿可先核对编辑；恢复保留旧稿及浏览器里的文本、答案、分类、难度和勾选状态，只补充有明确来源身份的新题，不确定题段仍需核对。服务/worker 重启、过期或教材配置变化后重新上传。新任务继承发起者的空间与账号权限，仍需审查后入库。
+- AI 选题支持 1–30 题、题型配额、排除题篮已有题、限定范围内去重与缺额报告。高中数学可选库内近年高考参考卷及有出处页码的课标选摘；来源标注不等于官方认证。候选池最多 120 题，长题和图题在有界初筛后完整复读，最多两次模型请求；缺图、全文超预算及本地补选均明确标记。模型只从候选 ID 中选题，等待期间题目或题图变化会排除旧判断。数学以外学科不套用高中数学参考卷/课标。所有难度仍为平台 1–5 级。
+- 平台代理等待预算覆盖两阶段模型调用。取消、队列容量、空间 worker 淘汰规则继续沿用现有机制。没有新增持久化题库表或升级原生 schema。
+
+只读接口统一位于 `/bank/{space_id}/api/agent`，必须携带已登录会话并具有该空间查看权限。它不提供独立 Key、匿名访问或直接 worker 地址。接口只支持 GET：
+
+| 路径 | 用途 |
+| --- | --- |
+| `/capabilities` | 学科、学段、难度及可用能力 |
+| `/questions?q=关键词&page=1&page_size=20` | 字面检索与分页，最多 100 条/页 |
+| `/questions/{id}`、`/questions/batch?ids=1,2` | 按 ID 读取，批量最多 100 题 |
+| `/knowledge-points?q=集合` | 当前教材的考查知识点，仅高中数学可用 |
+| `/assets?ids=1,2`、`/questions/{id}/assets` | 已校验的题图资源索引，不返回宿主机绝对路径 |
+
+题目支持 `profile=candidate|teaching|evidence` 和 `include_answers=true|false`；检索可按题型、难度、教材路径、来源、多值 `knowledge_point_codes` 筛选。知识点来自现有平台目录与空间标注，只在连接内存中投影，不创建原生知识点表；题库始终以 SQLite `mode=ro` 打开。`evidence` 返回的是已有来源/标注记录，不保证题目、答案或知识点质量。
+
+专项验证：`tests_platform/test_upstream_workflows.py`、`upstream_ui_smoke.py` 与 `export_glyph_acceptance.py`。假模型验证协议、缓存与权限边界，不代表真实模型识别/选题质量验收。
+
 ## 新增的组织层
 
 - 账号由超级管理员或团队管理员创建，无自助注册；管理员可改姓名、重置密码、停用账号（立即使登录失效），超级管理员还可调整角色和团队。本人可修改密码。

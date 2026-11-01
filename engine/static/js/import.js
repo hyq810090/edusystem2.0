@@ -1439,6 +1439,7 @@
         let batchSelectedImages = [];
         let parsedQuestionsData = [];
         let parsedQuestionsGeneration = 0;
+        let pdfRecoveryDrafts = null;
         let retainedDocumentResult = null;
 
         function stopDocumentResultRetention() {
@@ -1774,7 +1775,7 @@
                 && vision.retries < visionCalls ? vision.retries : null;
             const requestSummary = visionCalls
                 ? `逐页识别请求 ${visionCalls} 次` + (retryCount !== null ? `，其中失败后重试 ${retryCount} 次` : '') +
-                    (Number.isSafeInteger(vision?.timeout_seconds) && vision.timeout_seconds > 0 && vision.timeout_seconds <= 3600
+                    (Number.isSafeInteger(vision?.timeout_seconds) && vision.timeout_seconds > 0 && vision.timeout_seconds <= 7200
                         ? `；每次超时设为 ${vision.timeout_seconds} 秒。` : '。')
                 : '';
             return `PDF 提取方式：原生直提 ${nativePages} 页` +
@@ -1798,7 +1799,7 @@
                 && splitting.retries < splitting.calls ? splitting.retries : null;
             return `PDF 整卷拆题请求 ${splitting.calls} 次` +
                 (retries !== null ? `，其中失败后重试 ${retries} 次` : '') +
-                (Number.isSafeInteger(splitting.timeout_seconds) && splitting.timeout_seconds > 0 && splitting.timeout_seconds <= 3600
+                (Number.isSafeInteger(splitting.timeout_seconds) && splitting.timeout_seconds > 0 && splitting.timeout_seconds <= 7200
                     ? `；每次超时设为 ${splitting.timeout_seconds} 秒。` : '。');
         }
 
@@ -2741,7 +2742,7 @@
                 const bytes = new Uint8Array(buffer || new ArrayBuffer(0));
                 const label = file.name.toLowerCase().endsWith('.md') ? 'Markdown' : 'TeX';
                 if (!bytes.length) throw new Error(`${label} 文件为空`);
-                if (bytes.length > 5 * 1024 * 1024) throw new Error(`${label} 文件超过 5MB 上限`);
+                if (bytes.length > (window.__processingLimits?.text_source_bytes || 5 * 1024 * 1024)) throw new Error(`${label} 文件超过 ${Math.floor((window.__processingLimits?.text_source_bytes || 5 * 1024 * 1024) / 1048576)}MB 上限`);
 
                 const attempts = [];
                 if ((bytes[0] === 0xFF && bytes[1] === 0xFE) || (bytes[0] === 0xFE && bytes[1] === 0xFF)) {
@@ -3376,6 +3377,7 @@
         }
 
         function beginDocumentImportTask() {
+            pdfRecoveryDrafts = null;
             if (typeof stopDocumentResultRetention === 'function') stopDocumentResultRetention();
             documentImportTaskGeneration += 1;
             stopCurrentDocumentPoll();
@@ -3484,7 +3486,7 @@
                             } else if (task.status === 'ai_splitting' || (task.log && task.log.includes('大模型') || task.log.includes('pdf-inspector') || task.log.includes('Word 原生'))) {
                                 subText.textContent = '文本与公式已提取完毕，正在通过大模型进行题目切片与属性匹配...' +
                                     (Number.isSafeInteger(task.diagnostics?.pdf_splitting?.timeout_seconds)
-                                        && task.diagnostics.pdf_splitting.timeout_seconds > 0 && task.diagnostics.pdf_splitting.timeout_seconds <= 3600
+                                        && task.diagnostics.pdf_splitting.timeout_seconds > 0 && task.diagnostics.pdf_splitting.timeout_seconds <= 7200
                                         ? `每次超时 ${task.diagnostics.pdf_splitting.timeout_seconds} 秒，可恢复失败最多重试一次，复用已提取内容。` : '');
                             } else if (task.status === 'completed') {
                                 subText.textContent = '拆解完成，正在呈现题目审查列表...';
@@ -3499,7 +3501,7 @@
                     
                     if (task.status === 'completed') {
                         if (!finishDocumentPoll(identity)) return;
-                        replaceParsedQuestions(task.data || []);
+                        replaceParsedQuestions(mergePdfRecoveryCards(task.data || [], taskId));
                         if (typeof startDocumentResultRetention === 'function') startDocumentResultRetention(taskId);
                         const isWordTask = task.document_type === 'docx';
                         const documentLabel = isWordTask ? 'Word' : 'PDF';
@@ -3548,6 +3550,14 @@
                         runBtn.disabled = false;
                         runBtn.innerHTML = '<i class="fa-solid fa-wand-magic-sparkles"></i> <span>开始解析</span>';
                     } else if (task.status === 'error') {
+                        if (Array.isArray(task.data) && task.data.length) {
+                            replaceParsedQuestions(mergePdfRecoveryCards(task.data, taskId));
+                            renderParsedQuestionsList(parsedQuestionsData);
+                            document.getElementById('parsedQuestionsWrapper').classList.remove('hidden');
+                        }
+                        window.dispatchEvent(new CustomEvent('mathbank:pdf-recovery', {detail: {taskId,
+                            available: task.pdf_resume_available === true, report: task.pdf_recovery || {}}}));
+
                         if (!finishDocumentPoll(identity)) return;
                         appendImportLog(`分析失败: ${task.error || '未知错误'}`, 'error');
                         const splittingSummary = paperSplittingReportSummary(task.diagnostics?.pdf_splitting);
@@ -4672,7 +4682,7 @@
                     <!-- Card Top Configs Bar -->
                     <div class="grid grid-cols-2 sm:grid-cols-5 gap-2 border-b pb-3 shrink-0">
                         <div class="flex items-center space-x-2 select-none text-slate-700 text-xs font-bold">
-                            <input type="checkbox" data-index="${index}" class="card-select-checkbox h-4 w-4 rounded border-slate-300 text-brand-600 focus:ring-brand-500 cursor-pointer transition-colors" ${q.saved ? 'disabled' : (q.classification_review?.required === true ? '' : 'checked')} onclick="event.stopPropagation()">
+                            <input type="checkbox" data-index="${index}" class="card-select-checkbox h-4 w-4 rounded border-slate-300 text-brand-600 focus:ring-brand-500 cursor-pointer transition-colors" ${q.saved ? 'disabled' : ((typeof q._pdfResumeSelected === 'boolean' ? q._pdfResumeSelected : q.classification_review?.required !== true) ? 'checked' : '')} onclick="event.stopPropagation()">
                             <span class="h-5 w-5 bg-brand-50 text-brand-600 rounded-full flex items-center justify-center text-[10px] font-bold border border-brand-100">${index + 1}</span>
                             <span>题型与难度</span>
                         </div>
@@ -6131,8 +6141,8 @@
                     showToast('参考文件必须是图片。', 'error');
                     return;
                 }
-                if (file.size > 10 * 1024 * 1024) {
-                    showToast('参考图不能超过 10MB。', 'error');
+                if (file.size > (window.__processingLimits?.image_upload_bytes || 10 * 1024 * 1024)) {
+                    showToast(`参考图不能超过 ${Math.floor((window.__processingLimits?.image_upload_bytes || 10 * 1024 * 1024) / 1048576)}MB。`, 'error');
                     return;
                 }
                 clearTikzReference();
@@ -6975,3 +6985,52 @@
         window.closeParsedDuplicateReviewModal = closeParsedDuplicateReviewModal;
         window.associateRelatedQuestion = associateRelatedQuestion;
         window.clearRelatedQuestion = clearRelatedQuestion;
+
+        function mergePdfRecoveryCards(incoming, taskId) {
+            if (!pdfRecoveryDrafts || pdfRecoveryDrafts.taskId !== taskId) return incoming;
+            const delivered = pdfRecoveryDrafts.ids;
+            const current = new Map();
+            parsedQuestionsData.forEach((question, index) => {
+                const id = question.pdf_source_card_id;
+                if (!id || !delivered.has(id)) return;
+                const card = document.getElementById(`parsed-card-${index}`);
+                const item = buildParsedQuestionDuplicateItem(index);
+                if (item) {
+                    for (const key of ['content', 'answer_markdown', 'question_type', 'image_paths']) question[key] = item[key];
+                }
+                for (const [field, selector] of Object.entries({difficulty: '.card-difficulty', source: '.card-source',
+                    tags: '.card-tags', category_compulsory: '.card-compulsory', category_chapter: '.card-chapter',
+                    category_knowledge: '.card-knowledge'})) {
+                    const input = card?.querySelector(selector);
+                    if (input) question[field] = input.value;
+                }
+                const checkbox = card?.querySelector('.card-select-checkbox');
+                if (checkbox) question._pdfResumeSelected = checkbox.checked;
+                current.set(id, question);
+            });
+            // A card deleted during recovery stays deleted; model output never restores its old text.
+            const appended = incoming.filter(question => !delivered.has(question.pdf_source_card_id));
+            return [...current.values(), ...appended];
+        }
+
+        window.resumePdfImportTask = async function(taskId) {
+            if (window.currentPdfTaskId !== taskId) throw new Error('当前试卷已变化，请使用当前任务的恢复按钮。');
+            const response = await fetch(`/api/tasks/${encodeURIComponent(taskId)}/resume`, {method: 'POST'});
+            const body = await response.json();
+            if (!response.ok) throw new Error(body.detail || body.message || '恢复失败');
+            if (window.currentPdfTaskId !== taskId) {
+                await fetch(`/api/tasks/${encodeURIComponent(body.task_id)}/cancel`, {method: 'POST'});
+                throw new Error('当前试卷已变化，已取消这次恢复。');
+            }
+            const generation = beginDocumentImportTask();
+            pdfRecoveryDrafts = {taskId: body.task_id,
+                ids: new Set(parsedQuestionsData.map(q => q.pdf_source_card_id).filter(Boolean))};
+            document.getElementById('resetImportBtn')?.remove();
+            const button = document.getElementById('runParseBtn');
+            if (button) button.disabled = true;
+            document.getElementById('importLoadingState').classList.remove('hidden');
+            document.getElementById('importLoadingText').textContent = '正在恢复 PDF，已编辑题稿会保留。';
+            appendImportLog('复用已识别页面，重试未完成步骤；后续原文核验与审查入库照常执行。', 'info');
+            pollPdfTaskStatus(body.task_id, generation);
+            return body;
+        };

@@ -14,6 +14,7 @@ import os
 import re
 import shutil
 import subprocess
+from mathbank.processing_timeouts import WORD_CONVERSION_TIMEOUT_SECONDS
 import tempfile
 import unicodedata
 import zipfile
@@ -410,7 +411,7 @@ class PandocOmmlConverter:
                     ],
                     stdout=subprocess.PIPE,
                     stderr=subprocess.PIPE,
-                    timeout=45,
+                    timeout=WORD_CONVERSION_TIMEOUT_SECONDS,
                     check=False,
                 )
             except (OSError, subprocess.TimeoutExpired):
@@ -708,7 +709,7 @@ $\displaystyle {formula}$
                 cwd=temp_path,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.STDOUT,
-                timeout=30,
+                timeout=WORD_CONVERSION_TIMEOUT_SECONDS,
                 check=False,
             )
             pdf_path = temp_path / "formula.pdf"

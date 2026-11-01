@@ -9,6 +9,7 @@ import pytest
 import requests
 
 from mathbank import pdf_source_verify as verify
+from mathbank.document_requests import DOCUMENT_AI_TIMEOUT_SECONDS
 from mathbank.ai_providers import resolve_ocr_provider
 from mathbank.task_manager import TaskCancelled
 
@@ -116,7 +117,7 @@ def test_confirmed_only_clear_review_keep_original_evidence_and_text(setup):
     assert setup.diagnostics["source_review_count"] == 1
     assert [item["question_index"] for item in setup.diagnostics["pdf_review_items"]] == [1]
     payload = setup.calls[0][1]
-    assert setup.calls[0][2]["timeout"] == 600
+    assert setup.calls[0][2]["timeout"] == DOCUMENT_AI_TIMEOUT_SECONDS
     assert setup.calls[0][2]["retry_connection"] is False
     assert payload["max_tokens"] == 4096
     assert len([part for part in payload["messages"][0]["content"] if part["type"] == "image_url"]) == 2

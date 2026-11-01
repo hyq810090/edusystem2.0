@@ -7,6 +7,8 @@ retried; additional calls are deliberate correction/referee rounds.
 """
 from __future__ import annotations
 
+from mathbank.ai_timeouts import DOCUMENT_AI_TIMEOUT_SECONDS
+
 from collections import Counter
 from copy import deepcopy
 import hashlib
@@ -91,7 +93,7 @@ def repair_verified_differences(items, decisions, *, provider, request, attachme
                                 verification_content, parse_verdicts, validate_output,
                                 check_evidence, check_cancelled, budget, max_chars=24000,
                                 max_output_tokens=4096, progress=lambda message: None,
-                                timeout_seconds=120):
+                                timeout_seconds=DOCUMENT_AI_TIMEOUT_SECONDS):
     """Return confirmed outputs and audit records; never mutate caller questions.
 
     Adapters reapply their local gates to every edited candidate and verify the

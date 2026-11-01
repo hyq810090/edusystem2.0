@@ -38,6 +38,9 @@ def reset():
 def subject():
     return _config['subject'] if _config else '数学'
 
+def stage():
+    return _config["stage"] if _config else "高中"
+
 def label():
     return (_config['stage'] if _config else '高中') + subject()
 

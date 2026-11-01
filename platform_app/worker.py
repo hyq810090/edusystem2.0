@@ -109,6 +109,10 @@ def create_app():
     pdf_ocr_cache.register(engine)
     from platform_app import knowledge_points
     knowledge_points.register(engine,config)
+    from platform_app import agent_reads, paper_selection, pdf_resume
+    agent_reads.register(engine,config)
+    paper_selection.register(engine,config)
+    pdf_resume.register(engine,config)
     from starlette.responses import JSONResponse
     active_requests=0
     @engine.app.middleware('http')

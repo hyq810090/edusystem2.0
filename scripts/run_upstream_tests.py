@@ -7,7 +7,7 @@ import sys
 import tempfile
 
 root=Path(__file__).resolve().parents[1]
-tests=['test_asset_lifecycle.py','test_asset_security.py','test_question_duplicate_api.py',
+tests=['test_agent_reads.py','test_pdf_partial_recovery.py','test_paper_standards.py','test_paper_standard_alignment.py','test_pdf_partial.py','test_processing_runtime.py','test_ai_timeouts.py','test_processing_limits.py','test_export_geometry_glyphs.py','test_pdf_export_diagnostics.py','test_latex_diagnostics.py','test_asset_lifecycle.py','test_asset_security.py','test_question_duplicate_api.py',
        'test_pdf_layout.py','test_pdf_raster_guard.py','test_pdf_source_scopes.py',
        'test_pdf_source_verify.py','test_pdf_native_math.py','test_docx_source_scopes.py',
        'test_docx_source_verify.py','test_import_review.py','test_import_frontend.py',

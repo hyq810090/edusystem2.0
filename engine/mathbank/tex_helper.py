@@ -7,7 +7,9 @@ import re
 from typing import Optional
 
 
-MAX_TEX_BYTES = 5 * 1024 * 1024
+from mathbank.processing_limits import LIMITS
+
+MAX_TEX_BYTES = LIMITS.text_source_bytes
 _VERBATIM_ENVS = {"verbatim", "Verbatim", "lstlisting", "minted"}
 _QUESTION_ENVS = {"problem", "exercise", "question", "example", "ti"}
 _TABLE_ENVS = ("tabular", "tabularx", "longtable", "array")

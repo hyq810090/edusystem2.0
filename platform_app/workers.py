@@ -13,6 +13,8 @@ import httpx
 from fastapi import HTTPException
 from platform_app import store
 from platform_app.worker import ENV_KEYS
+from engine.mathbank.ai_timeouts import AI_REQUEST_TIMEOUT_SECONDS, DOCUMENT_AI_TIMEOUT_SECONDS
+from engine.mathbank.processing_timeouts import LATEX_EXPORT_TIMEOUT_SECONDS, WORD_CONVERSION_TIMEOUT_SECONDS
 
 def write_private(path,value):
     """Replace a file holding model keys with one owned by this process and mode 0600.
@@ -38,7 +40,7 @@ class Workers:
     def __init__(self):
         self.workers={}
         self.locks={}
-        self.client=httpx.AsyncClient(trust_env=False,timeout=httpx.Timeout(900,connect=5))
+        self.client=httpx.AsyncClient(trust_env=False,timeout=httpx.Timeout(max(AI_REQUEST_TIMEOUT_SECONDS * 2, DOCUMENT_AI_TIMEOUT_SECONDS * 2, LATEX_EXPORT_TIMEOUT_SECONDS * 2, WORD_CONVERSION_TIMEOUT_SECONDS) + 60,connect=5))
 
     async def get(self,space):
         space_id=space['id']

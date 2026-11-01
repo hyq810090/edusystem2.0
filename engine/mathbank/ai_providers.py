@@ -658,3 +658,18 @@ def resolve_draw_provider(
         supports_image_input=supports_image_input,
         raw_config=raw_config,
     )
+
+
+def supports_classification_images(provider) -> bool:
+    """Only confirmed identities may add images to an existing text task.
+
+    Drawing entry points permit custom multimodal names. Classification must
+    not inherit that assumption for an arbitrary saved text-model name.
+    """
+    code, model = provider.provider_code, provider.model_name
+    return ((code == "deepseek" and _deepseek_supports_images(model))
+            or (code == "siliconflow" and model.lower() == "deepseek-ai/deepseek-v4.1-flash")
+            or _is_siliconflow_qwen38_27b(provider)
+            # This exact user-requested relay identity accepted the bounded
+            # classification images in live probes; unknown relays stay text.
+            or (code == "zhongzhan_claude" and model == "gemini-3.8-flash-high"))

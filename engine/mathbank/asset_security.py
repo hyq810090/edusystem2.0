@@ -20,11 +20,13 @@ from typing import Iterable
 from PIL import Image, ImageOps, UnidentifiedImageError
 
 
-MAX_SINGLE_IMAGE_BYTES = 10 * 1024 * 1024
-MAX_OCR_IMAGE_BYTES = 10 * 1024 * 1024
-MAX_PDF_BYTES = 30 * 1024 * 1024
-MAX_IMAGE_PIXELS = 30_000_000
-MAX_NORMALIZED_IMAGE_BYTES = 20 * 1024 * 1024
+from .processing_limits import LIMITS
+
+MAX_SINGLE_IMAGE_BYTES = LIMITS.image_upload_bytes
+MAX_OCR_IMAGE_BYTES = LIMITS.image_upload_bytes
+MAX_PDF_BYTES = LIMITS.document_upload_bytes
+MAX_IMAGE_PIXELS = LIMITS.image_pixels
+MAX_NORMALIZED_IMAGE_BYTES = LIMITS.normalized_image_bytes
 
 SAFE_IMAGE_EXTENSIONS = frozenset({".png", ".jpg", ".jpeg", ".gif", ".webp"})
 _SAFE_ASSET_COMPONENT = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]*$")
@@ -376,7 +378,7 @@ def normalize_raster_image(
             normalized = output.getvalue()
     except InvalidImageError:
         raise
-    except (UnidentifiedImageError, OSError, ValueError, Image.DecompressionBombError) as exc:
+    except (UnidentifiedImageError, OSError, ValueError, SyntaxError, Image.DecompressionBombError) as exc:
         raise InvalidImageError("文件内容不是有效且安全的栅格图片。") from exc
 
     if len(normalized) > max_output_bytes:

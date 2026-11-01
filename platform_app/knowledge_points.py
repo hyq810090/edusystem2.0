@@ -249,7 +249,7 @@ def model_reply(engine, question):
         {'role': 'user', 'content': json.dumps(fields, ensure_ascii=False)}],
         'response_format': {'type': 'json_object'}, 'temperature': 0.2, 'max_tokens': 2000}
     data = engine.apply_model_thinking_policy(data, provider=provider, task='classify')
-    response = engine.post_chat_completion(provider, data, timeout=90, provider_name=provider.credential_label)
+    response = engine.post_chat_completion(provider, data, timeout=engine.AI_REQUEST_TIMEOUT_SECONDS, provider_name=provider.credential_label)
     text = response.json()['choices'][0]['message']['content'].strip()
     text = re.sub(r'^```(?:json)?\s*|\s*```$', '', text)
     return json.loads(text)

@@ -794,3 +794,13 @@ button.mb-kp-role { cursor: pointer; }
   font-size: 10px; line-height: 18px; border: 1px solid rgba(var(--brand-500-rgb), .25); background: rgba(var(--brand-500-rgb), .07); color: var(--text-secondary); }
 .mb-kp-card span[data-role="auxiliary"] { border-style: dashed; background: transparent; }
 .mb-kp :focus-visible, .mb-kp-filter :focus-visible { outline: 2px solid rgba(var(--brand-500-rgb), .65); outline-offset: 1px; }
+
+/* Extra selection controls use the native theme and survive toolbar rebuilds. */
+.mb-selection-tools,.mb-selection-quotas { display:flex; flex-wrap:wrap; gap:0.75rem; align-items:flex-end; }
+.mb-selection-tools { margin-top:0.75rem; }
+.mb-selection-field { display:flex; flex-direction:column; gap:0.3rem; color:var(--text-secondary); font-size:0.75rem; max-width:100%; }
+.mb-selection-field input { width:7rem; }
+.mb-selection-field select { max-width:100%; }
+.mb-selection-quotas { padding-top:0.5rem; }
+#platformPdfResume { margin-top:0.75rem; }
+@media(max-width:600px) { .mb-selection-tools { align-items:stretch; } .mb-selection-field select { width:100%; } }

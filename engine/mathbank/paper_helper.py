@@ -16,7 +16,8 @@ from sqlalchemy.orm import Session
 from mathbank.database import Question, Paper, PaperQuestion, QuestionCurriculum
 from mathbank.paths import TEMPLATES_DIR
 from mathbank.question_types import PAPER_TYPE_ORDER, custom_type_labels, is_written_question_type, paper_type_order
-from mathbank.latex_diagnostics import build_local_latex_diagnostic
+from mathbank.latex_diagnostics import build_local_latex_diagnostic, extract_missing_glyphs
+from mathbank.processing_timeouts import LATEX_EXPORT_TIMEOUT_SECONDS
 from mathbank.asset_security import AssetSecurityError, resolve_upload_asset
 
 # In-memory LRU cache for compiled PDF bytes
@@ -727,6 +728,7 @@ def build_latex_document(
         grouped[q_type].append(item)
         
     labels = custom_type_labels(question_types)
+    question_number = 0
     for q_type in paper_type_order(grouped, paper_type, question_types, section_order):
         if q_type not in grouped or not grouped[q_type]:
             continue
@@ -890,9 +892,13 @@ def build_latex_document(
                 )
                 fig_body = figure_separator.join(fig_elements)
 
+            question_number += 1
             question_id = q.get("id")
             if question_id is not None:
                 lines.append(f"% MathBank-Question-ID: {question_id}")
+                lines.append(f"% MathBank-Question-Number: {question_number}")
+                lines.append("% MathBank-Field: content")
+                lines.append(rf"\typeout{{MathBank-Question-Start: {question_id} {question_number} content}}")
             lines.append(f"\\begin{{{env_name}}}{points_arg}")
             if fig_body:
                 choices_part = ""
@@ -1002,9 +1008,15 @@ def build_latex_document(
             if include_answers:
                 ans_text = q.get("answer_markdown", "").strip()
                 if ans_text:
+                    lines.append("% MathBank-Field: answer_markdown")
+                    if question_id is not None:
+                        lines.append(rf"\typeout{{MathBank-Question-Start: {question_id} {question_number} answer_markdown}}")
                     lines.append(r"\begin{solution}")
                     lines.append(clean_content_for_latex(ans_text))
                     lines.append(r"\end{solution}")
+            if question_id is not None:
+                lines.append(rf"\typeout{{MathBank-Question-Finish: {question_id}}}")
+            lines.append("% MathBank-Question-End")
             lines.append("")
 
     lines.append(r"\end{document}")
@@ -1050,8 +1062,8 @@ def collect_referenced_images(
     return image_paths
 
 
-def _latex_failure_message(processes: list, temp_dir: str) -> str:
-    """Collect the first actionable TeX error plus the final log summary."""
+def _latex_compile_log(processes: list, temp_dir: str) -> str:
+    """Read evidence before truncating it or allowing another pass to overwrite it."""
     log_parts = []
     for proc in processes:
         if proc is None:
@@ -1061,7 +1073,19 @@ def _latex_failure_message(processes: list, temp_dir: str) -> str:
     if os.path.exists(log_path):
         with open(log_path, "r", encoding="utf-8", errors="ignore") as log_file:
             log_parts.append(log_file.read())
-    log_txt = "\n".join(part for part in log_parts if part)
+    return "\n".join(part for part in log_parts if part)
+
+
+def _latex_failure_message(processes: list, temp_dir: str) -> str:
+    """Collect actionable errors, including missing glyphs in a successful run."""
+    log_txt = _latex_compile_log(processes, temp_dir)
+    # Missing-character diagnostics can occur anywhere in a long log. Keep
+    # their complete lines and adjacent source evidence ahead of the summary.
+    glyph_blocks = []
+    log_lines = log_txt.splitlines()
+    for index, line in enumerate(log_lines):
+        if "Missing character:" in line:
+            glyph_blocks.append("\n".join(log_lines[max(0, index - 1):index + 7]))
     first_error = log_txt.find("\n!")
     if len(log_txt) <= 8000:
         diagnostic = log_txt
@@ -1069,6 +1093,16 @@ def _latex_failure_message(processes: list, temp_dir: str) -> str:
         diagnostic = f"{log_txt[max(0, first_error - 1000):first_error + 3000]}\n...\n{log_txt[-4000:]}"
     else:
         diagnostic = f"{log_txt[:2000]}\n...\n{log_txt[-6000:]}"
+    glyph_evidence = "\n".join(dict.fromkeys(glyph_blocks))[:12000]
+    if glyph_evidence:
+        diagnostic = glyph_evidence + "\n" + diagnostic
+    # Scanning an unclosed question body may reach EOF without a source line.
+    # Preserve the bounded runtime scopes after the (possibly truncated) log;
+    # only the dedicated runaway-environment diagnostic consumes these events.
+    runtime_events = [line for line in log_lines if re.fullmatch(
+        r"MathBank-Question-(?:Start: \d+ \d+ (?:content|answer_markdown)|Finish: \d+)", line.strip())]
+    if runtime_events:
+        diagnostic += "\nMathBank compilation scope events:\n" + "\n".join(runtime_events[-128:])
     return f"编译失败，无法生成完整 PDF:\n{diagnostic}"
 
 
@@ -1116,7 +1150,7 @@ def compile_tex_to_pdf(tex_content: str, image_paths: list = None) -> tuple:
         if os.path.exists(img_p):
             img_signatures.append(f"{img_p}:{os.path.getmtime(img_p)}")
     
-    cache_raw_str = f"{tex_content}||{'|'.join(img_signatures)}"
+    cache_raw_str = f"glyph-check-v1||{tex_content}||{'|'.join(img_signatures)}"
     cache_key = hashlib.md5(cache_raw_str.encode("utf-8")).hexdigest()
 
     # 2. Check LRU Cache
@@ -1165,9 +1199,11 @@ def compile_tex_to_pdf(tex_content: str, image_paths: list = None) -> tuple:
                     cwd=temp_dir,
                     capture_output=True,
                     text=True,
-                    timeout=30,
+                    timeout=LATEX_EXPORT_TIMEOUT_SECONDS,
                     env=build_restricted_tex_environment(temp_dir),
                 )
+                if extract_missing_glyphs(_latex_compile_log([first_proc], temp_dir)):
+                    return None, _latex_failure_message([first_proc], temp_dir)
                 if first_proc.returncode != 0:
                     failure_message = _latex_failure_message([first_proc], temp_dir)
                     local = build_local_latex_diagnostic(failure_message, current_tex)
@@ -1190,9 +1226,11 @@ def compile_tex_to_pdf(tex_content: str, image_paths: list = None) -> tuple:
                     cwd=temp_dir,
                     capture_output=True,
                     text=True,
-                    timeout=30,
+                    timeout=LATEX_EXPORT_TIMEOUT_SECONDS,
                     env=build_restricted_tex_environment(temp_dir),
                 )
+                if extract_missing_glyphs(_latex_compile_log([proc], temp_dir)):
+                    return None, _latex_failure_message([proc], temp_dir)
                 pdf_path = os.path.join(temp_dir, "paper.pdf")
                 if proc.returncode == 0 and os.path.exists(pdf_path) and os.path.getsize(pdf_path) > 0:
                     with open(pdf_path, "rb") as pf:
@@ -1227,7 +1265,7 @@ def compile_tex_to_pdf(tex_content: str, image_paths: list = None) -> tuple:
         except FileNotFoundError:
             return (None, "系统未检测到 xelatex 编译器，请确保已安装 TeX Live / MiKTeX / MacTeX 并加入 PATH。")
         except subprocess.TimeoutExpired:
-            return (None, "LaTeX 编译超时（超过 30 秒）。")
+            return (None, f"LaTeX 编译超时（超过 {LATEX_EXPORT_TIMEOUT_SECONDS} 秒）。")
         except Exception as e:
             return (None, f"编译过程异常: {str(e)}")
 
